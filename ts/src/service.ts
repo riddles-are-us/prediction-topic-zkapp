@@ -155,9 +155,9 @@ function extra(app: Express) {
 
 service.serve();
 
-const EVENT_MARKET_UPDATE = 1;
-const EVENT_BET_UPDATE = 2;
-const EVENT_PLAYER_UPDATE = 3;
+const EVENT_PLAYER_UPDATE = 1;
+const EVENT_MARKET_UPDATE = 2;
+const EVENT_BET_UPDATE = 3;
 
 async function bootstrap(merkleRoot: string): Promise<TxWitness[]> {
     return [];

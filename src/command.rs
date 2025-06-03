@@ -2,7 +2,6 @@ use crate::error::*;
 use crate::event::{insert_event, EVENT_MARKET_UPDATE, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
-use zkwasm_rust_sdk::require;
 
 #[derive(Clone)]
 pub enum Command {

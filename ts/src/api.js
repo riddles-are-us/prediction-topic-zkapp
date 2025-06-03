@@ -1,110 +1,113 @@
+import fetch from 'node-fetch';
+import { PlayerConvention, ZKWasmAppRpc, createCommand } from "zkwasm-minirollup-rpc";
 import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
-export class PredictionMarketAPI {
-    constructor(serverUrl = "http://localhost:3000") {
-        this.adminKey = get_server_admin_key();
-        this.serverUrl = serverUrl;
+export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
+// Command constants matching the Rust code
+export const TICK = 0;
+export const INSTALL_PLAYER = 1;
+export const WITHDRAW = 2;
+export const DEPOSIT = 3;
+export const BET = 4;
+export const RESOLVE = 5;
+export const CLAIM = 6;
+// Player class for transaction handling
+export class Player extends PlayerConvention {
+    constructor(key, rpc) {
+        super(key, rpc, BigInt(DEPOSIT), BigInt(WITHDRAW));
+        this.processingKey = key;
+        this.rpc = rpc;
     }
-    // Place a bet
-    async placeBet(betType, amount, playerKey) {
+    async sendTransactionWithCommand(cmd) {
         try {
-            // This would integrate with the zkwasm transaction system
-            // For now, this is a placeholder showing the structure
-            console.log(`Placing bet: ${betType === 1 ? 'YES' : 'NO'}, amount: ${amount}`);
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 1 (bet)
-            // 2. Include bet_type, amount, and player key
-            // 3. Submit to the zkwasm system
-            return { success: true, message: "Bet placed successfully" };
+            let result = await this.rpc.sendTransaction(cmd, this.processingKey);
+            return result;
         }
-        catch (error) {
-            console.error("Error placing bet:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+        catch (e) {
+            if (e instanceof Error) {
+                console.log(e.message);
+            }
+            throw e;
         }
     }
-    // Resolve market (admin only)
+    async installPlayer() {
+        let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+    async placeBet(betType, amount) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+    async claimWinnings() {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(CLAIM), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+    async withdrawFunds(amount, addressHigh, addressLow) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW), [amount, addressHigh, addressLow]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+    async depositFunds(amount, targetPid1, targetPid2) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
     async resolveMarket(outcome) {
-        try {
-            console.log(`Resolving market with outcome: ${outcome ? 'YES' : 'NO'}`);
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 2 (resolve)
-            // 2. Include outcome and admin key
-            // 3. Submit to the zkwasm system
-            return { success: true, message: "Market resolved successfully" };
-        }
-        catch (error) {
-            console.error("Error resolving market:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
+        return await this.sendTransactionWithCommand(cmd);
     }
-    // Claim winnings
-    async claimWinnings(playerKey) {
-        try {
-            console.log("Claiming winnings");
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 3 (claim)
-            // 2. Include player key
-            // 3. Submit to the zkwasm system
-            return { success: true, message: "Winnings claimed successfully" };
-        }
-        catch (error) {
-            console.error("Error claiming winnings:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+}
+export class PredictionMarketAPI {
+    constructor(baseUrl = API_BASE_URL) {
+        this.adminKey = get_server_admin_key();
+        this.baseUrl = baseUrl;
     }
     // Get market data
-    async getMarketData() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/market`);
-            return await response.json();
+    async getMarket() {
+        const response = await fetch(`${this.baseUrl}/data/market`);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get market data');
         }
-        catch (error) {
-            console.error("Error fetching market data:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        return result.data;
     }
     // Get player data
-    async getPlayerData(pid1, pid2) {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/player/${pid1}/${pid2}`);
-            return await response.json();
+    async getPlayer(pid1, pid2) {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}`);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get player data');
         }
-        catch (error) {
-            console.error("Error fetching player data:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        return result.data;
     }
     // Get market statistics
-    async getMarketStats() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/stats`);
-            return await response.json();
+    async getStats() {
+        const response = await fetch(`${this.baseUrl}/data/stats`);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get stats');
         }
-        catch (error) {
-            console.error("Error fetching market stats:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        return result.data;
     }
     // Get all bets
     async getAllBets() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/bets`);
-            return await response.json();
+        const response = await fetch(`${this.baseUrl}/data/bets`);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get bets data');
         }
-        catch (error) {
-            console.error("Error fetching bets:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        return result.data;
     }
     // Get player's bets
     async getPlayerBets(pid1, pid2) {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/bets/${pid1}/${pid2}`);
-            return await response.json();
+        const response = await fetch(`${this.baseUrl}/data/bets/${pid1}/${pid2}`);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get player bets');
         }
-        catch (error) {
-            console.error("Error fetching player bets:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        return result.data;
     }
     // Calculate expected shares for a bet amount
     calculateExpectedShares(betType, amount, yesLiquidity, noLiquidity) {
@@ -136,26 +139,64 @@ export class PredictionMarketAPI {
         return { yesPrice, noPrice };
     }
 }
+// Transaction building utilities
+export function buildBetTransaction(nonce, betType, amount) {
+    const commandWithNonce = BigInt(BET) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, BigInt(betType), amount, 0n, 0n];
+}
+export function buildResolveTransaction(nonce, outcome) {
+    const commandWithNonce = BigInt(RESOLVE) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, outcome ? 1n : 0n, 0n, 0n, 0n];
+}
+export function buildClaimTransaction(nonce) {
+    const commandWithNonce = BigInt(CLAIM) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, 0n, 0n, 0n];
+}
+export function buildWithdrawTransaction(nonce, amount, addressHigh, addressLow) {
+    const commandWithNonce = BigInt(WITHDRAW) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, amount, addressHigh, addressLow];
+}
+export function buildDepositTransaction(nonce, targetPid1, targetPid2, amount) {
+    const commandWithNonce = BigInt(DEPOSIT) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, targetPid1, targetPid2, 0n, amount];
+}
+export function buildInstallPlayerTransaction(nonce) {
+    const commandWithNonce = BigInt(INSTALL_PLAYER) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, 0n, 0n, 0n];
+}
 // Example usage
 export async function exampleUsage() {
     const api = new PredictionMarketAPI();
-    // Get market data
-    const marketData = await api.getMarketData();
-    console.log("Market data:", marketData);
-    // Get market statistics
-    const stats = await api.getMarketStats();
-    console.log("Market stats:", stats);
-    // Example of calculating expected shares
-    if (marketData.success && marketData.data) {
-        const yesLiquidity = BigInt(marketData.data.yesLiquidity);
-        const noLiquidity = BigInt(marketData.data.noLiquidity);
-        const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
-        const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
-        console.log(`For 1000 units bet:`);
-        console.log(`Expected YES shares: ${expectedYesShares}`);
-        console.log(`Expected NO shares: ${expectedNoShares}`);
-        const prices = api.calculatePrices(yesLiquidity, noLiquidity);
-        console.log(`Current prices - YES: ${(prices.yesPrice * 100).toFixed(2)}%, NO: ${(prices.noPrice * 100).toFixed(2)}%`);
+    const rpc = new ZKWasmAppRpc("http://localhost:3000");
+    // Create player instance (replace with actual key)
+    const playerKey = "123";
+    const player = new Player(playerKey, rpc);
+    try {
+        // Install player
+        console.log("Installing player...");
+        await player.installPlayer();
+        // Get market data
+        const marketData = await api.getMarket();
+        console.log("Market data:", marketData);
+        // Calculate expected shares for a bet
+        if (marketData.yesLiquidity && marketData.noLiquidity) {
+            const yesLiquidity = BigInt(marketData.yesLiquidity);
+            const noLiquidity = BigInt(marketData.noLiquidity);
+            const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
+            const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
+            console.log(`For 1000 units bet:`);
+            console.log(`Expected YES shares: ${expectedYesShares}`);
+            console.log(`Expected NO shares: ${expectedNoShares}`);
+            // Place a bet
+            console.log("Placing YES bet...");
+            await player.placeBet(1, 1000n); // YES bet for 1000 units
+            // Get updated market stats
+            const stats = await api.getStats();
+            console.log("Updated market stats:", stats);
+        }
+    }
+    catch (error) {
+        console.error("Error in example usage:", error);
     }
 }
 //# sourceMappingURL=api.js.map

@@ -1,120 +1,172 @@
+import fetch from 'node-fetch';
+import { PlayerConvention, ZKWasmAppRpc, createCommand } from "zkwasm-minirollup-rpc";
 import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
+
+export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
+
+// Command constants matching the Rust code
+export const TICK = 0;
+export const INSTALL_PLAYER = 1;
+export const WITHDRAW = 2;
+export const DEPOSIT = 3;
+export const BET = 4;
+export const RESOLVE = 5;
+export const CLAIM = 6;
+
+export interface MarketData {
+    title: string;
+    description: string;
+    startTime: string;
+    endTime: string;
+    resolutionTime: string;
+    yesLiquidity: string;
+    noLiquidity: string;
+    totalVolume: string;
+    resolved: boolean;
+    outcome: boolean | null;
+    totalFeesCollected: string;
+    yesPrice: string;
+    noPrice: string;
+}
+
+export interface PlayerData {
+    balance: string;
+    yesShares: string;
+    noShares: string;
+    claimed: boolean;
+}
+
+export interface BetData {
+    pid1: string;
+    pid2: string;
+    betType: number;
+    amount: string;
+    shares: string;
+    timestamp: string;
+}
+
+export interface StatsData {
+    totalVolume: string;
+    totalBets: number;
+    totalPlayers: number;
+    totalFeesCollected: string;
+    yesLiquidity: string;
+    noLiquidity: string;
+}
+
+// Player class for transaction handling
+export class Player extends PlayerConvention {
+    constructor(key: string, rpc: ZKWasmAppRpc) {
+        super(key, rpc, BigInt(DEPOSIT), BigInt(WITHDRAW));
+        this.processingKey = key;
+        this.rpc = rpc;
+    }
+
+    async sendTransactionWithCommand(cmd: BigUint64Array) {
+        try {
+            let result = await this.rpc.sendTransaction(cmd, this.processingKey);
+            return result;
+        } catch (e) {
+            if (e instanceof Error) {
+                console.log(e.message);
+            }
+            throw e;
+        }
+    }
+
+    async installPlayer() {
+        let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async placeBet(betType: number, amount: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async claimWinnings() {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(CLAIM), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async withdrawFunds(amount: bigint, addressHigh: bigint, addressLow: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW), [amount, addressHigh, addressLow]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async depositFunds(amount: bigint, targetPid1: bigint, targetPid2: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async resolveMarket(outcome: boolean) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+}
 
 export class PredictionMarketAPI {
     private adminKey: any;
-    private serverUrl: string;
+    private baseUrl: string;
 
-    constructor(serverUrl: string = "http://localhost:3000") {
+    constructor(baseUrl: string = API_BASE_URL) {
         this.adminKey = get_server_admin_key();
-        this.serverUrl = serverUrl;
-    }
-
-    // Place a bet
-    async placeBet(betType: number, amount: number, playerKey: any) {
-        try {
-            // This would integrate with the zkwasm transaction system
-            // For now, this is a placeholder showing the structure
-            console.log(`Placing bet: ${betType === 1 ? 'YES' : 'NO'}, amount: ${amount}`);
-            
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 1 (bet)
-            // 2. Include bet_type, amount, and player key
-            // 3. Submit to the zkwasm system
-            
-            return { success: true, message: "Bet placed successfully" };
-        } catch (error) {
-            console.error("Error placing bet:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
-    }
-
-    // Resolve market (admin only)
-    async resolveMarket(outcome: boolean) {
-        try {
-            console.log(`Resolving market with outcome: ${outcome ? 'YES' : 'NO'}`);
-            
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 2 (resolve)
-            // 2. Include outcome and admin key
-            // 3. Submit to the zkwasm system
-            
-            return { success: true, message: "Market resolved successfully" };
-        } catch (error) {
-            console.error("Error resolving market:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
-    }
-
-    // Claim winnings
-    async claimWinnings(playerKey: any) {
-        try {
-            console.log("Claiming winnings");
-            
-            // In a real implementation, this would:
-            // 1. Create a transaction with command 3 (claim)
-            // 2. Include player key
-            // 3. Submit to the zkwasm system
-            
-            return { success: true, message: "Winnings claimed successfully" };
-        } catch (error) {
-            console.error("Error claiming winnings:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
+        this.baseUrl = baseUrl;
     }
 
     // Get market data
-    async getMarketData() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/market`);
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching market data:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+    async getMarket(): Promise<MarketData> {
+        const response = await fetch(`${this.baseUrl}/data/market`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get market data');
         }
+        return result.data;
     }
 
     // Get player data
-    async getPlayerData(pid1: string, pid2: string) {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/player/${pid1}/${pid2}`);
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching player data:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+    async getPlayer(pid1: string, pid2: string): Promise<PlayerData> {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get player data');
         }
+        return result.data;
     }
 
     // Get market statistics
-    async getMarketStats() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/stats`);
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching market stats:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+    async getStats(): Promise<StatsData> {
+        const response = await fetch(`${this.baseUrl}/data/stats`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get stats');
         }
+        return result.data;
     }
 
     // Get all bets
-    async getAllBets() {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/bets`);
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching bets:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+    async getAllBets(): Promise<BetData[]> {
+        const response = await fetch(`${this.baseUrl}/data/bets`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get bets data');
         }
+        return result.data;
     }
 
     // Get player's bets
-    async getPlayerBets(pid1: string, pid2: string) {
-        try {
-            const response = await fetch(`${this.serverUrl}/data/bets/${pid1}/${pid2}`);
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching player bets:", error);
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+    async getPlayerBets(pid1: string, pid2: string): Promise<BetData[]> {
+        const response = await fetch(`${this.baseUrl}/data/bets/${pid1}/${pid2}`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get player bets');
         }
+        return result.data;
     }
 
     // Calculate expected shares for a bet amount
@@ -152,31 +204,86 @@ export class PredictionMarketAPI {
     }
 }
 
+// Transaction building utilities
+export function buildBetTransaction(nonce: number, betType: number, amount: bigint): bigint[] {
+    const commandWithNonce = BigInt(BET) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, BigInt(betType), amount, 0n, 0n];
+}
+
+export function buildResolveTransaction(nonce: number, outcome: boolean): bigint[] {
+    const commandWithNonce = BigInt(RESOLVE) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, outcome ? 1n : 0n, 0n, 0n, 0n];
+}
+
+export function buildClaimTransaction(nonce: number): bigint[] {
+    const commandWithNonce = BigInt(CLAIM) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, 0n, 0n, 0n];
+}
+
+export function buildWithdrawTransaction(
+    nonce: number, 
+    amount: bigint, 
+    addressHigh: bigint, 
+    addressLow: bigint
+): bigint[] {
+    const commandWithNonce = BigInt(WITHDRAW) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, amount, addressHigh, addressLow];
+}
+
+export function buildDepositTransaction(
+    nonce: number,
+    targetPid1: bigint,
+    targetPid2: bigint,
+    amount: bigint
+): bigint[] {
+    const commandWithNonce = BigInt(DEPOSIT) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, targetPid1, targetPid2, 0n, amount];
+}
+
+export function buildInstallPlayerTransaction(nonce: number): bigint[] {
+    const commandWithNonce = BigInt(INSTALL_PLAYER) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, 0n, 0n, 0n, 0n];
+}
+
 // Example usage
 export async function exampleUsage() {
     const api = new PredictionMarketAPI();
+    const rpc = new ZKWasmAppRpc("http://localhost:3000");
+    
+    // Create player instance (replace with actual key)
+    const playerKey = "123";
+    const player = new Player(playerKey, rpc);
 
-    // Get market data
-    const marketData = await api.getMarketData();
-    console.log("Market data:", marketData);
+    try {
+        // Install player
+        console.log("Installing player...");
+        await player.installPlayer();
 
-    // Get market statistics
-    const stats = await api.getMarketStats();
-    console.log("Market stats:", stats);
+        // Get market data
+        const marketData = await api.getMarket();
+        console.log("Market data:", marketData);
 
-    // Example of calculating expected shares
-    if (marketData.success && marketData.data) {
-        const yesLiquidity = BigInt(marketData.data.yesLiquidity);
-        const noLiquidity = BigInt(marketData.data.noLiquidity);
-        
-        const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
-        const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
-        
-        console.log(`For 1000 units bet:`);
-        console.log(`Expected YES shares: ${expectedYesShares}`);
-        console.log(`Expected NO shares: ${expectedNoShares}`);
+        // Calculate expected shares for a bet
+        if (marketData.yesLiquidity && marketData.noLiquidity) {
+            const yesLiquidity = BigInt(marketData.yesLiquidity);
+            const noLiquidity = BigInt(marketData.noLiquidity);
+            
+            const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
+            const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
+            
+            console.log(`For 1000 units bet:`);
+            console.log(`Expected YES shares: ${expectedYesShares}`);
+            console.log(`Expected NO shares: ${expectedNoShares}`);
 
-        const prices = api.calculatePrices(yesLiquidity, noLiquidity);
-        console.log(`Current prices - YES: ${(prices.yesPrice * 100).toFixed(2)}%, NO: ${(prices.noPrice * 100).toFixed(2)}%`);
+            // Place a bet
+            console.log("Placing YES bet...");
+            await player.placeBet(1, 1000n); // YES bet for 1000 units
+
+            // Get updated market stats
+            const stats = await api.getStats();
+            console.log("Updated market stats:", stats);
+        }
+    } catch (error) {
+        console.error("Error in example usage:", error);
     }
 } 
