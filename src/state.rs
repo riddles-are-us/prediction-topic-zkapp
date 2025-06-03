@@ -3,6 +3,7 @@ use zkwasm_rest_abi::{StorageData, MERKLE_MAP};
 use std::cell::RefCell;
 use crate::market::MarketData;
 use crate::player::PlayerData;
+use crate::config::DEFAULT_MARKET;
 
 #[derive(Serialize)]
 pub struct QueryState {
@@ -20,17 +21,13 @@ pub struct GlobalState {
 
 impl GlobalState {
     pub fn new() -> Self {
-        // Default market: "Will Bitcoin reach $100,000 by end of 2024?"
-        // Time is based on counter ticks (5 seconds per tick)
-        // Start immediately (counter = 0)
-        // End after 1 day = 86400 seconds = 17280 ticks
-        // Resolution time same as end time
+        // Create market using config parameters
         let market = MarketData::new(
-            "Bitcoin $100K by 2024".to_string(),
-            "Will Bitcoin reach $100,000 USD by December 31, 2024?".to_string(),
-            0,      // Start time (counter = 0, system start)
-            17280,  // End time (counter = 17280, ~1 day later)
-            17280,  // Resolution time (same as end time)
+            DEFAULT_MARKET.title.to_string(),
+            DEFAULT_MARKET.description.to_string(),
+            DEFAULT_MARKET.start_time,
+            DEFAULT_MARKET.end_time,
+            DEFAULT_MARKET.resolution_time,
         );
 
         GlobalState {

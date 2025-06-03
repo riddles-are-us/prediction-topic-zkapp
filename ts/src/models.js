@@ -66,11 +66,11 @@ export class Market {
         }
     }
     static fromEvent(eventData) {
-        return new Market("Bitcoin $100K by 2024", // title
-        "Will Bitcoin reach $100,000 USD by December 31, 2024?", // description
-        1700000000n, // startTime
-        1735689600n, // endTime
-        1735689600n, // resolutionTime
+        return new Market("Bitcoin $100K by 2024", // title (matches config)
+        "Will Bitcoin reach $100,000 USD by December 31, 2024?", // description (matches config)
+        0n, // startTime (counter = 0)
+        17280n, // endTime (counter = 17280, ~1 day)
+        17280n, // resolutionTime (same as endTime)
         eventData[0], // yesLiquidity
         eventData[1], // noLiquidity
         eventData[2], // totalVolume

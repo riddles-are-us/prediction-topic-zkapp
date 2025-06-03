@@ -130,12 +130,47 @@ make clean
 6. **领取期**: 获胜方用户领取奖励
 7. **提现期**: 用户可以提现剩余资金
 
-## 时间系统（可以自定义）
+## 配置系统
+
+### 市场配置（src/config.rs）
+
+可以在 `config.rs` 中自定义默认市场参数：
+
+```rust
+pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
+    title: "Bitcoin $100K by 2024",
+    description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
+    start_time: 0,      // 立即开始
+    end_time: 17280,    // 1天后结束
+    resolution_time: 17280, // 解决时间
+};
+```
+
+> 📖 详细的配置示例请参考 [config_examples.md](config_examples.md)
+
+### 时间系统
 
 - **计时单位**: 基于 counter 值，每个 tick = 5 秒
-- **市场开始**: counter = 0（系统启动时）
-- **市场结束**: counter = 17280（约1天后）
-- **时间换算**: 1小时 = 720 ticks，1天 = 17280 ticks
+- **时间换算常量**:
+  - `TICKS_PER_MINUTE = 12`
+  - `TICKS_PER_HOUR = 720` 
+  - `TICKS_PER_DAY = 17280`
+
+### 时间配置示例
+
+```rust
+// 1小时市场
+end_time: TICKS_PER_HOUR,
+
+// 12小时市场  
+end_time: TICKS_PER_HOUR * 12,
+
+// 3天市场
+end_time: TICKS_PER_DAY * 3,
+
+// 自定义时间（30分钟）
+end_time: DefaultMarketConfig::seconds_to_ticks(1800),
+```
 
 ## 错误代码
 
