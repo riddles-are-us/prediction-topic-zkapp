@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+pkg/
+admin.pubkey
+ts/dist/
+ts/node_modules/ 
