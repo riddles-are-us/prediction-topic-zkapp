@@ -10,8 +10,9 @@ export const INSTALL_PLAYER = 1;
 export const WITHDRAW = 2;
 export const DEPOSIT = 3;
 export const BET = 4;
-export const RESOLVE = 5;
-export const CLAIM = 6;
+export const SELL = 5;
+export const RESOLVE = 6;
+export const CLAIM = 7;
 
 export interface MarketData {
     title: string;
@@ -82,6 +83,12 @@ export class Player extends PlayerConvention {
     async placeBet(betType: number, amount: bigint) {
         let nonce = await this.getNonce();
         let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async sellShares(sellType: number, shares: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
         return await this.sendTransactionWithCommand(cmd);
     }
 
@@ -190,6 +197,112 @@ export class PredictionMarketAPI {
         }
     }
 
+    // Calculate expected payout for selling shares
+    calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
+        if (shares <= 0) return 0n;
+
+        const PLATFORM_FEE_RATE = 25n; // 0.25%
+        const k = yesLiquidity * noLiquidity;
+
+        if (sellType === 1) { // Sell YES shares
+            const newYesLiquidity = yesLiquidity + BigInt(shares);
+            const newNoLiquidity = k / newYesLiquidity;
+            if (noLiquidity > newNoLiquidity) {
+                const grossAmount = noLiquidity - newNoLiquidity;
+                const fee = (grossAmount * PLATFORM_FEE_RATE) / 10000n;
+                return grossAmount - fee;
+            }
+        } else { // Sell NO shares
+            const newNoLiquidity = noLiquidity + BigInt(shares);
+            const newYesLiquidity = k / newNoLiquidity;
+            if (yesLiquidity > newYesLiquidity) {
+                const grossAmount = yesLiquidity - newYesLiquidity;
+                const fee = (grossAmount * PLATFORM_FEE_RATE) / 10000n;
+                return grossAmount - fee;
+            }
+        }
+        return 0n;
+    }
+
+    // Get effective buy price per share
+    getBuyPrice(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
+        if (amount <= 0) return 0;
+
+        const shares = this.calculateExpectedShares(betType, amount, yesLiquidity, noLiquidity);
+        if (shares === 0n) return 0;
+
+        // Return price per share (1.0 = 1 token per share)
+        return Number(BigInt(amount) * 1000000n / shares) / 1000000;
+    }
+
+    // Get effective sell price per share
+    getSellPrice(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): number {
+        if (shares <= 0) return 0;
+
+        const payout = this.calculateSellValue(sellType, shares, yesLiquidity, noLiquidity);
+        if (payout === 0n) return 0;
+
+        // Return price per share (1.0 = 1 token per share)
+        return Number(payout * 1000000n / BigInt(shares)) / 1000000;
+    }
+
+    // Calculate market impact (price change after trade)
+    calculateMarketImpact(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): { 
+        currentYesPrice: number, 
+        currentNoPrice: number, 
+        newYesPrice: number, 
+        newNoPrice: number 
+    } {
+        const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity);
+        
+        if (amount <= 0) {
+            return {
+                currentYesPrice: currentPrices.yesPrice,
+                currentNoPrice: currentPrices.noPrice,
+                newYesPrice: currentPrices.yesPrice,
+                newNoPrice: currentPrices.noPrice
+            };
+        }
+
+        // Simulate the trade
+        const PLATFORM_FEE_RATE = 25n; // 0.25%
+        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / 10000n;
+        const netAmount = BigInt(amount) - fee;
+
+        const k = yesLiquidity * noLiquidity;
+        let newYesLiquidity = yesLiquidity;
+        let newNoLiquidity = noLiquidity;
+
+        if (betType === 1) { // YES bet
+            newNoLiquidity = noLiquidity + netAmount;
+            newYesLiquidity = k / newNoLiquidity;
+        } else { // NO bet
+            newYesLiquidity = yesLiquidity + netAmount;
+            newNoLiquidity = k / newYesLiquidity;
+        }
+
+        const newPrices = this.calculatePrices(newYesLiquidity, newNoLiquidity);
+
+        return {
+            currentYesPrice: currentPrices.yesPrice,
+            currentNoPrice: currentPrices.noPrice,
+            newYesPrice: newPrices.yesPrice,
+            newNoPrice: newPrices.noPrice
+        };
+    }
+
+    // Calculate slippage (difference between market price and effective price)
+    calculateSlippage(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
+        if (amount <= 0) return 0;
+
+        const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity);
+        const currentPrice = betType === 1 ? currentPrices.yesPrice : currentPrices.noPrice;
+        
+        const effectivePrice = this.getBuyPrice(betType, amount, yesLiquidity, noLiquidity);
+        
+        return Math.max(0, effectivePrice - currentPrice);
+    }
+
     // Calculate current prices
     calculatePrices(yesLiquidity: bigint, noLiquidity: bigint): { yesPrice: number, noPrice: number } {
         const totalLiquidity = yesLiquidity + noLiquidity;
@@ -208,6 +321,11 @@ export class PredictionMarketAPI {
 export function buildBetTransaction(nonce: number, betType: number, amount: bigint): bigint[] {
     const commandWithNonce = BigInt(BET) | (BigInt(nonce) << 16n);
     return [commandWithNonce, BigInt(betType), amount, 0n, 0n];
+}
+
+export function buildSellTransaction(nonce: number, sellType: number, shares: bigint): bigint[] {
+    const commandWithNonce = BigInt(SELL) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, BigInt(sellType), shares, 0n, 0n];
 }
 
 export function buildResolveTransaction(nonce: number, outcome: boolean): bigint[] {
@@ -263,17 +381,32 @@ export async function exampleUsage() {
         const marketData = await api.getMarket();
         console.log("Market data:", marketData);
 
-        // Calculate expected shares for a bet
+        // Calculate prices and expected values
         if (marketData.yesLiquidity && marketData.noLiquidity) {
             const yesLiquidity = BigInt(marketData.yesLiquidity);
             const noLiquidity = BigInt(marketData.noLiquidity);
             
+            // Current market prices
+            const prices = api.calculatePrices(yesLiquidity, noLiquidity);
+            console.log(`Current market prices: YES=${prices.yesPrice.toFixed(3)}, NO=${prices.noPrice.toFixed(3)}`);
+
+            // Calculate buy prices for 1000 units
+            const yesBuyPrice = api.getBuyPrice(1, 1000, yesLiquidity, noLiquidity);
+            const noBuyPrice = api.getBuyPrice(0, 1000, yesLiquidity, noLiquidity);
+            console.log(`Buy prices for 1000 units: YES=${yesBuyPrice.toFixed(3)}, NO=${noBuyPrice.toFixed(3)}`);
+
+            // Calculate market impact
+            const yesImpact = api.calculateMarketImpact(1, 1000, yesLiquidity, noLiquidity);
+            console.log(`YES bet impact: ${yesImpact.currentYesPrice.toFixed(3)} → ${yesImpact.newYesPrice.toFixed(3)}`);
+
+            // Calculate slippage
+            const yesSlippage = api.calculateSlippage(1, 1000, yesLiquidity, noLiquidity);
+            console.log(`YES bet slippage: ${yesSlippage.toFixed(3)}`);
+
+            // Calculate expected shares and sell prices
             const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
-            const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
-            
-            console.log(`For 1000 units bet:`);
-            console.log(`Expected YES shares: ${expectedYesShares}`);
-            console.log(`Expected NO shares: ${expectedNoShares}`);
+            const yesSellPrice = api.getSellPrice(1, Number(expectedYesShares), yesLiquidity, noLiquidity);
+            console.log(`Expected YES shares: ${expectedYesShares}, sell price: ${yesSellPrice.toFixed(3)}`);
 
             // Place a bet
             console.log("Placing YES bet...");

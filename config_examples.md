@@ -1,42 +1,74 @@
-# 市场配置示例
+# Market Configuration Examples
 
-本文档展示如何在 `src/config.rs` 中自定义不同类型的预测市场。
+This document shows how to customize different types of prediction markets in `src/config.rs`.
 
-## 基本配置结构
+## Basic Configuration Structure
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "市场标题",
-    description: "市场描述",
-    start_time: 开始时间（tick数）,
-    end_time: 结束时间（tick数）,
-    resolution_time: 解决时间（tick数）,
+    title: "Market Title",
+    description: "Market Description",
+    start_time: start_time_in_ticks,
+    end_time: end_time_in_ticks,
+    resolution_time: resolution_time_in_ticks,
+    initial_yes_liquidity: 1000000,
+    initial_no_liquidity: 1000000,
 };
 ```
 
-## 时间换算参考
+## Time Conversion Reference
 
-- 1 tick = 5 秒
-- 1 分钟 = 12 ticks
-- 1 小时 = 720 ticks  
-- 1 天 = 17280 ticks
-- 1 周 = 120960 ticks
+- 1 tick = 5 seconds
+- 1 minute = 12 ticks
+- 1 hour = 720 ticks  
+- 1 day = 17280 ticks
+- 1 week = 120960 ticks
 
-## 配置示例
+## Liquidity Configuration
 
-### 1. 短期市场（1小时）
+Initial liquidity affects market pricing and slippage:
+
+- **Higher liquidity** = Lower price impact per bet, more stable prices
+- **Lower liquidity** = Higher price impact per bet, more volatile prices
+
+### Recommended Liquidity Levels
+
+- **Quick markets (< 1 hour)**: 100,000 - 500,000 per side
+- **Short markets (1-24 hours)**: 500,000 - 1,000,000 per side  
+- **Medium markets (1-7 days)**: 1,000,000 - 2,000,000 per side
+- **Long markets (> 1 week)**: 2,000,000+ per side
+
+### Asymmetric Liquidity
+
+You can also set different initial liquidity for YES and NO:
+
+```rust
+// Market biased toward NO (cheaper YES bets initially)
+initial_yes_liquidity: 800000,
+initial_no_liquidity: 1200000,
+
+// Market biased toward YES (cheaper NO bets initially)  
+initial_yes_liquidity: 1200000,
+initial_no_liquidity: 800000,
+```
+
+## Configuration Examples
+
+### 1. Short-term Market (1 hour)
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "BTC 1小时涨跌",
-    description: "Bitcoin价格在接下来1小时内会上涨吗？",
+    title: "BTC 1-Hour Price Movement",
+    description: "Will Bitcoin price go up in the next 1 hour?",
     start_time: 0,
     end_time: TICKS_PER_HOUR,        // 720 ticks
     resolution_time: TICKS_PER_HOUR,
+    initial_yes_liquidity: 500000,   // Lower liquidity for shorter market
+    initial_no_liquidity: 500000,
 };
 ```
 
-### 2. 中期市场（1天，默认配置）
+### 2. Medium-term Market (1 day, default configuration)
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
@@ -45,71 +77,79 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     start_time: 0,
     end_time: TICKS_PER_DAY,         // 17280 ticks
     resolution_time: TICKS_PER_DAY,
+    initial_yes_liquidity: 1000000,  // Standard liquidity
+    initial_no_liquidity: 1000000,
 };
 ```
 
-### 3. 长期市场（1周）
+### 3. Long-term Market (1 week)
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "ETH 2.0 完全启动",
-    description: "以太坊2.0会在一周内完全启动吗？",
+    title: "ETH 2.0 Full Launch",
+    description: "Will Ethereum 2.0 fully launch within one week?",
     start_time: 0,
     end_time: TICKS_PER_DAY * 7,     // 120960 ticks
     resolution_time: TICKS_PER_DAY * 7,
+    initial_yes_liquidity: 2000000,  // Higher liquidity for longer market
+    initial_no_liquidity: 2000000,
 };
 ```
 
-### 4. 延迟解决市场
+### 4. Delayed Resolution Market
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "股市收盘预测",
-    description: "今日股市收盘会上涨吗？",
+    title: "Stock Market Close Prediction",
+    description: "Will the stock market close higher today?",
     start_time: 0,
-    end_time: TICKS_PER_HOUR * 8,        // 8小时后停止投注
-    resolution_time: TICKS_PER_HOUR * 10, // 10小时后才能解决
+    end_time: TICKS_PER_HOUR * 8,        // Stop betting after 8 hours
+    resolution_time: TICKS_PER_HOUR * 10, // Can only resolve after 10 hours
+    initial_yes_liquidity: 750000,       // Medium liquidity
+    initial_no_liquidity: 750000,
 };
 ```
 
-### 5. 自定义时间市场
+### 5. Custom Time Market
 
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "30分钟快速预测",
-    description: "接下来30分钟内会发生X事件吗？",
+    title: "30-Minute Quick Prediction",
+    description: "Will event X happen in the next 30 minutes?",
     start_time: 0,
-    end_time: DefaultMarketConfig::seconds_to_ticks(1800), // 30分钟 = 1800秒
+    end_time: DefaultMarketConfig::seconds_to_ticks(1800), // 30 minutes = 1800 seconds
     resolution_time: DefaultMarketConfig::seconds_to_ticks(1800),
+    initial_yes_liquidity: 250000,       // Low liquidity for quick market
+    initial_no_liquidity: 250000,
 };
 ```
 
-## 实用工具函数
+## Utility Functions
 
-在 `DefaultMarketConfig` 中提供了时间转换工具：
+Time conversion tools provided in `DefaultMarketConfig`:
 
 ```rust
-// 秒转tick
-let ticks = DefaultMarketConfig::seconds_to_ticks(3600); // 1小时
+// Convert seconds to ticks
+let ticks = DefaultMarketConfig::seconds_to_ticks(3600); // 1 hour
 
-// tick转秒  
-let seconds = DefaultMarketConfig::ticks_to_seconds(720); // 720 ticks = 3600秒
+// Convert ticks to seconds  
+let seconds = DefaultMarketConfig::ticks_to_seconds(720); // 720 ticks = 3600 seconds
 
-// 获取市场持续时间
+// Get market duration
 let duration_ticks = DEFAULT_MARKET.duration_ticks();
 let duration_seconds = DEFAULT_MARKET.duration_seconds();
 ```
 
-## 修改配置步骤
+## Configuration Modification Steps
 
-1. 编辑 `src/config.rs` 中的 `DEFAULT_MARKET` 配置
-2. 重新编译: `make build`
-3. 重启应用 `make run`
+1. Edit `DEFAULT_MARKET` configuration in `src/config.rs`
+2. Recompile: `make build`
+3. Restart application: `make run`
 
-## 注意事项
+## Important Notes
 
-- `start_time` 通常设为 0（系统启动时立即开始）
-- `end_time` 必须大于 `start_time`
-- `resolution_time` 必须大于等于 `end_time`
-- 时间单位统一使用 tick（5秒为1个tick）
-- 建议使用预定义的时间常量（`TICKS_PER_HOUR` 等）以提高可读性 
+- `start_time` is usually set to 0 (start immediately when system boots)
+- `end_time` must be greater than `start_time`
+- `resolution_time` must be greater than or equal to `end_time`
+- Time unit consistently uses ticks (5 seconds per tick)
+- Recommend using predefined time constants (`TICKS_PER_HOUR` etc.) for better readability 

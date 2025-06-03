@@ -69,9 +69,10 @@ impl CommandHandler for Deposit {
 #[derive(Clone)]
 pub enum Activity {
     // Prediction market activities
-    Bet(u64, u64), // bet_type, amount
-    Resolve(u64),  // outcome
-    Claim,         // claim winnings
+    Bet(u64, u64),  // bet_type, amount
+    Sell(u64, u64), // sell_type, shares_amount
+    Resolve(u64),   // outcome
+    Claim,          // claim winnings
 }
 
 impl CommandHandler for Activity {
@@ -84,6 +85,9 @@ impl CommandHandler for Activity {
                 match self {
                     Activity::Bet(bet_type, amount) => {
                         Self::handle_bet(player, *bet_type, *amount, counter)
+                    },
+                    Activity::Sell(sell_type, shares) => {
+                        Self::handle_sell(player, *sell_type, *shares, counter)
                     },
                     Activity::Resolve(outcome) => {
                         // Only admin can resolve - we need to check this at a higher level
@@ -140,6 +144,53 @@ impl Activity {
         Ok(())
     }
 
+    fn handle_sell(player: &mut Player, sell_type: u64, shares: u64, _counter: u64) -> Result<(), u32> {
+        if shares == 0 {
+            return Err(ERROR_INVALID_BET_AMOUNT);
+        }
+
+        // Check if market is active
+        let current_time = GLOBAL_STATE.0.borrow().counter;
+        let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        
+        if !global_state.market.is_active(current_time) {
+            return Err(ERROR_MARKET_NOT_ACTIVE);
+        }
+
+        // Check player has enough shares and sell
+        let payout = if sell_type == 1 {
+            // Sell YES shares
+            if player.data.yes_shares < shares {
+                return Err(ERROR_INSUFFICIENT_BALANCE);
+            }
+            let payout = global_state.market.sell_yes(shares)?;
+            player.data.yes_shares -= shares;
+            payout
+        } else {
+            // Sell NO shares
+            if player.data.no_shares < shares {
+                return Err(ERROR_INSUFFICIENT_BALANCE);
+            }
+            let payout = global_state.market.sell_no(shares)?;
+            player.data.no_shares -= shares;
+            payout
+        };
+
+        // Add payout to player balance
+        player.data.balance += payout;
+
+        // Store updated data
+        player.store();
+        global_state.counter += 1;
+
+        // Emit events
+        Self::emit_player_event(&player);
+        Self::emit_market_event();
+        Self::emit_sell_event(player.player_id, sell_type, shares, payout);
+
+        Ok(())
+    }
+
     fn handle_resolve(outcome: u64, _counter: u64) -> Result<(), u32> {
         let current_time = GLOBAL_STATE.0.borrow().counter;
         let mut global_state = GLOBAL_STATE.0.borrow_mut();
@@ -172,7 +223,7 @@ impl Activity {
         let payout = global_state.market.calculate_payout(
             player.data.yes_shares,
             player.data.no_shares,
-        );
+        )?;
 
         if payout == 0 {
             return Err(ERROR_NO_WINNING_POSITION);
@@ -229,6 +280,17 @@ impl Activity {
             shares,
         ];
         insert_event(EVENT_BET_UPDATE, &mut data);
+    }
+
+    fn emit_sell_event(player_id: [u64; 2], sell_type: u64, shares: u64, payout: u64) {
+        let mut data = vec![
+            player_id[0],
+            player_id[1],
+            sell_type + 10, // 11 = SELL_YES, 12 = SELL_NO (distinguish from bet events)
+            shares,
+            payout,
+        ];
+        insert_event(EVENT_BET_UPDATE, &mut data); // Reuse BET_UPDATE event for now
     }
 }
 

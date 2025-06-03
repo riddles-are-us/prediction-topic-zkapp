@@ -38,8 +38,19 @@ pub const EVENT_BET_UPDATE: u64 = 2;
 pub const EVENT_PLAYER_UPDATE: u64 = 3;
 
 // Market constants
-pub const INITIAL_LIQUIDITY: u64 = 1000000; // Initial liquidity for AMM
 pub const PLATFORM_FEE_RATE: u64 = 25; // 0.25% platform fee (25/10000)
+
+// Price precision constants
+pub const BASIS_POINTS_PRECISION: u64 = 10000;     // 10,000 basis points = 100%
+pub const PRICE_PRECISION: u64 = 1000000;          // 1,000,000 = 1.0 (higher precision for calculations)
+pub const PERCENTAGE_PRECISION: u64 = 100;         // 100 = 100%
+
+// Conversion helpers
+pub const BASIS_POINTS_TO_PRICE: u64 = PRICE_PRECISION / BASIS_POINTS_PRECISION; // 100
+pub const PERCENTAGE_TO_PRICE: u64 = PRICE_PRECISION / PERCENTAGE_PRECISION;     // 10,000
+
+// Fee calculation constant (matches PLATFORM_FEE_RATE denominator)
+pub const FEE_BASIS_POINTS: u64 = 10000; // Same as BASIS_POINTS_PRECISION for fees
 
 // Default market configuration
 pub struct DefaultMarketConfig {
@@ -48,6 +59,8 @@ pub struct DefaultMarketConfig {
     pub start_time: u64,
     pub end_time: u64,
     pub resolution_time: u64,
+    pub initial_yes_liquidity: u64,
+    pub initial_no_liquidity: u64,
 }
 
 lazy_static::lazy_static! {
@@ -57,6 +70,8 @@ lazy_static::lazy_static! {
         start_time: 0,      // Start immediately (counter = 0)
         end_time: 17280,    // End after 1 day (17280 ticks = 86400 seconds)
         resolution_time: 17280, // Resolution time same as end time
+        initial_yes_liquidity: 1000000, // Initial YES liquidity for AMM
+        initial_no_liquidity: 1000000,  // Initial NO liquidity for AMM
     };
 }
 

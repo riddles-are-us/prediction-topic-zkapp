@@ -8,8 +8,9 @@ export const INSTALL_PLAYER = 1;
 export const WITHDRAW = 2;
 export const DEPOSIT = 3;
 export const BET = 4;
-export const RESOLVE = 5;
-export const CLAIM = 6;
+export const SELL = 5;
+export const RESOLVE = 6;
+export const CLAIM = 7;
 // Player class for transaction handling
 export class Player extends PlayerConvention {
     constructor(key, rpc) {
@@ -36,6 +37,11 @@ export class Player extends PlayerConvention {
     async placeBet(betType, amount) {
         let nonce = await this.getNonce();
         let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+    async sellShares(sellType, shares) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
         return await this.sendTransactionWithCommand(cmd);
     }
     async claimWinnings() {
@@ -143,6 +149,10 @@ export class PredictionMarketAPI {
 export function buildBetTransaction(nonce, betType, amount) {
     const commandWithNonce = BigInt(BET) | (BigInt(nonce) << 16n);
     return [commandWithNonce, BigInt(betType), amount, 0n, 0n];
+}
+export function buildSellTransaction(nonce, sellType, shares) {
+    const commandWithNonce = BigInt(SELL) | (BigInt(nonce) << 16n);
+    return [commandWithNonce, BigInt(sellType), shares, 0n, 0n];
 }
 export function buildResolveTransaction(nonce, outcome) {
     const commandWithNonce = BigInt(RESOLVE) | (BigInt(nonce) << 16n);

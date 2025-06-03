@@ -10,6 +10,8 @@ pub mod player;
 pub mod settlement;
 pub mod state;
 pub mod market;
+pub mod math_safe;
+pub mod security_tests;
 
 use crate::config::Config;
 use crate::state::{GlobalState, Transaction};

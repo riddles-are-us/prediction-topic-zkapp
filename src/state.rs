@@ -28,7 +28,7 @@ impl GlobalState {
             DEFAULT_MARKET.start_time,
             DEFAULT_MARKET.end_time,
             DEFAULT_MARKET.resolution_time,
-        );
+        ).expect("Failed to create market");
 
         GlobalState {
             counter: 0,
@@ -149,8 +149,9 @@ const INSTALL_PLAYER: u64 = 1;
 const WITHDRAW: u64 = 2;
 const DEPOSIT: u64 = 3;
 const BET: u64 = 4;
-const RESOLVE: u64 = 5;
-const CLAIM: u64 = 6;
+const SELL: u64 = 5;
+const RESOLVE: u64 = 6;
+const CLAIM: u64 = 7;
 
 pub struct Transaction {
     command: crate::command::Command,
@@ -180,6 +181,8 @@ impl Transaction {
             })
         } else if command == BET {
             Command::Activity(Activity::Bet(params[1], params[2]))
+        } else if command == SELL {
+            Command::Activity(Activity::Sell(params[1], params[2]))
         } else if command == RESOLVE {
             Command::Activity(Activity::Resolve(params[1]))
         } else if command == CLAIM {
