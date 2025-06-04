@@ -134,7 +134,6 @@ impl Activity {
 
         // Store updated data
         player.store();
-        global_state.counter += 1;
 
         // Emit events
         Self::emit_player_event(&player);
@@ -181,7 +180,6 @@ impl Activity {
 
         // Store updated data
         player.store();
-        global_state.counter += 1;
 
         // Emit events
         Self::emit_player_event(&player);
@@ -201,7 +199,6 @@ impl Activity {
 
         let outcome_bool = outcome != 0;
         global_state.market.resolve(outcome_bool)?;
-        global_state.counter += 1;
 
         // Emit market update event
         Self::emit_market_event();
@@ -234,7 +231,6 @@ impl Activity {
         player.store();
 
         drop(global_state);
-        GLOBAL_STATE.0.borrow_mut().counter += 1;
 
         // Emit player update event
         Self::emit_player_event(&player);
