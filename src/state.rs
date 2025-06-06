@@ -38,25 +38,16 @@ impl GlobalState {
         }
     }
 
-
-
     pub fn snapshot() -> String {
-        let counter = GLOBAL_STATE.0.borrow().counter;
-        let total_players = GLOBAL_STATE.0.borrow().total_players;
-        serde_json::to_string(&QueryState { counter, total_players }).unwrap()
+        let state = GLOBAL_STATE.0.borrow();
+        serde_json::to_string(&*state).unwrap()
     }
 
     pub fn get_state(pid: Vec<u64>) -> String {
-        let player_id = zkwasm_rest_abi::Player::<PlayerData>::pkey_to_pid(&pid.try_into().unwrap());
-        let player = zkwasm_rest_abi::Player::<PlayerData>::get_from_pid(&player_id);
+        use crate::player::PredictionMarketPlayer;
         
-        match player {
-            Some(player) => serde_json::to_string(&player).unwrap(),
-            None => {
-                let empty_player = PlayerData::default();
-                serde_json::to_string(&empty_player).unwrap()
-            }
-        }
+        let player = PredictionMarketPlayer::get(&pid.try_into().unwrap()).unwrap();
+        serde_json::to_string(&player).unwrap()
     }
 
     pub fn preempt() -> bool {
@@ -199,12 +190,12 @@ impl Transaction {
 
     pub fn create_player(&self, pkey: &[u64; 4]) -> Result<(), u32> {
         use crate::player::Player;
-        use crate::error::ERROR_PLAYER_NOT_EXIST;
+        use crate::error::{ERROR_PLAYER_ALREADY_EXISTS};
         
         let player_id = Player::pkey_to_pid(pkey);
         let player = Player::get_from_pid(&player_id);
         match player {
-            Some(_) => Err(ERROR_PLAYER_NOT_EXIST), // Player already exists
+            Some(_) => Err(ERROR_PLAYER_ALREADY_EXISTS), // Player already exists
             None => {
                 let player = Player::new_from_pid(player_id);
                 player.store();

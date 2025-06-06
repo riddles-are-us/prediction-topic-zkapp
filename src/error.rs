@@ -12,6 +12,7 @@ pub const ERROR_INVALID_OUTCOME: u32 = 1010;
 pub const ERROR_INVALID_BET_TYPE: u32 = 1011;
 pub const ERROR_INVALID_MARKET_TIME: u32 = 1012;
 pub const ERROR_PLAYER_NOT_EXIST: u32 = 6;
+pub const ERROR_PLAYER_ALREADY_EXISTS: u32 = 8;
 
 // Security-related error codes
 pub const ERROR_OVERFLOW: u32 = 100;

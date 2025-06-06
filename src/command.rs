@@ -303,6 +303,7 @@ pub fn decode_error(e: u32) -> &'static str {
         ERROR_INVALID_MARKET_TIME => "InvalidMarketTime",
         ERROR_INVALID_BET_TYPE => "InvalidBetType",
         ERROR_PLAYER_NOT_EXIST => "PlayerNotExist",
+        ERROR_PLAYER_ALREADY_EXISTS => "PlayerAlreadyExists",
         _ => "Unknown",
     }
 } 

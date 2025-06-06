@@ -1,5 +1,9 @@
+import { PrivateKey, bnToHexLe } from "delphinus-curves/src/altjubjub";
+import dotenv from 'dotenv';
 import { PlayerConvention, ZKWasmAppRpc, createCommand } from 'zkwasm-minirollup-rpc';
-import { PredictionMarketAPI, exampleUsage } from './api.js';
+import { LeHexBN } from "zkwasm-ts-server";
+import { PredictionMarketAPI } from './api.js';
+dotenv.config();
 // Command constants
 const TICK = 0;
 const INSTALL_PLAYER = 1;
@@ -27,8 +31,17 @@ class Player extends PlayerConvention {
         }
     }
     async installPlayer() {
-        let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
-        return await this.sendTransactionWithCommand(cmd);
+        try {
+            let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
+            return await this.sendTransactionWithCommand(cmd);
+        }
+        catch (e) {
+            if (e instanceof Error && e.message === "PlayerAlreadyExists") {
+                console.log("Player already exists, skipping installation");
+                return null; // Not an error, just already exists
+            }
+            throw e; // Re-throw other errors
+        }
     }
     async placeBet(betType, amount) {
         let nonce = await this.getNonce();
@@ -47,7 +60,7 @@ class Player extends PlayerConvention {
     }
     async depositFunds(amount, targetPid1, targetPid2) {
         let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, amount]);
+        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, 0n, amount]);
         return await this.sendTransactionWithCommand(cmd);
     }
     async resolveMarket(outcome) {
@@ -79,31 +92,74 @@ async function testPredictionMarket() {
     console.log("=== Prediction Market Test ===");
     const api = new PredictionMarketAPI();
     const rpc = new ZKWasmAppRpc("http://localhost:3000");
-    // Example keys - replace with actual keys in production
-    const adminKey = "123";
-    const playerKey = "456";
+    // Use environment variable for admin key - this must match the admin.pubkey file
+    const adminKey = process.env.SERVER_ADMIN_KEY;
+    if (!adminKey) {
+        throw new Error("SERVER_ADMIN_KEY environment variable is required");
+    }
+    const playerKey = "456789789";
+    console.log("Admin key from env:", adminKey);
     try {
         // Create player instances
         const admin = new Player(adminKey, rpc);
         const player = new Player(playerKey, rpc);
-        console.log("1. Installing players...");
-        await admin.installPlayer();
-        await player.installPlayer();
-        console.log("2. Admin deposits funds for player...");
-        await admin.depositFunds(10000n, 123n, 456n); // Deposit 10000 units for player
-        console.log("3. Getting market data...");
-        const marketData = await api.getMarket();
-        console.log("Market info:", {
-            title: marketData.title,
-            description: marketData.description,
-            resolved: marketData.resolved,
-            yesLiquidity: marketData.yesLiquidity,
-            noLiquidity: marketData.noLiquidity
-        });
-        if (marketData.yesLiquidity && marketData.noLiquidity) {
-            const yesLiquidity = BigInt(marketData.yesLiquidity);
-            const noLiquidity = BigInt(marketData.noLiquidity);
-            console.log("4. Calculating bet predictions...");
+        // Get admin's public key to verify it matches
+        let adminPkey = PrivateKey.fromString(admin.processingKey);
+        let adminPubkey = adminPkey.publicKey.key.x.v;
+        let adminLeHexBN = new LeHexBN(bnToHexLe(adminPubkey));
+        let adminPkeyArray = adminLeHexBN.toU64Array();
+        console.log("Admin public key array:", adminPkeyArray);
+        // Get player's private key and pid
+        let pkey = PrivateKey.fromString(player.processingKey);
+        let pubkey = pkey.publicKey.key.x.v;
+        let leHexBN = new LeHexBN(bnToHexLe(pubkey));
+        let pkeyArray = leHexBN.toU64Array();
+        let playerpid = pkeyArray;
+        console.log("Player PID:", playerpid);
+        console.log("1. Installing admin...");
+        try {
+            await admin.installPlayer();
+        }
+        catch (e) {
+            if (e instanceof Error && e.message === "PlayerAlreadyExists") {
+                console.log("Admin already exists, continuing...");
+            }
+            else {
+                throw e;
+            }
+        }
+        console.log("2. Installing players...");
+        try {
+            await player.installPlayer();
+        }
+        catch (e) {
+            if (e instanceof Error && e.message === "PlayerAlreadyExists") {
+                console.log("Player already exists, continuing...");
+            }
+            else {
+                throw e;
+            }
+        }
+        console.log("3. Admin deposits funds for player...", pkeyArray[1], pkeyArray[2]);
+        console.log(admin.processingKey);
+        await admin.depositFunds(10000n, pkeyArray[1], pkeyArray[2]); // Deposit 10000 units for player
+        console.log("4. Getting player data (includes market info)...");
+        const playerData = await rpc.queryState(player.processingKey);
+        console.log("Player data with market info:", playerData);
+        if (playerData && playerData.market) {
+            const market = playerData.market;
+            const yesLiquidity = BigInt(market.yes_liquidity);
+            const noLiquidity = BigInt(market.no_liquidity);
+            console.log("5. Market info:");
+            console.log(`- Title: ${market.title}`);
+            console.log(`- YES Liquidity: ${yesLiquidity}`);
+            console.log(`- NO Liquidity: ${noLiquidity}`);
+            console.log(`- Resolved: ${market.resolved}`);
+            console.log("6. Player info:");
+            console.log(`- Balance: ${playerData.data.balance}`);
+            console.log(`- YES Shares: ${playerData.data.yes_shares}`);
+            console.log(`- NO Shares: ${playerData.data.no_shares}`);
+            console.log("7. Calculating bet predictions...");
             const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
             const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
             console.log(`Expected shares for 1000 units:`);
@@ -113,28 +169,23 @@ async function testPredictionMarket() {
             console.log(`Current prices:`);
             console.log(`- YES: ${(prices.yesPrice * 100).toFixed(2)}%`);
             console.log(`- NO: ${(prices.noPrice * 100).toFixed(2)}%`);
-            console.log("5. Player places bets...");
+            console.log("8. Player places bets...");
             await player.placeBet(1, 1000n); // YES bet
             await player.placeBet(0, 500n); // NO bet
-            console.log("6. Getting updated market stats...");
-            const stats = await api.getStats();
-            console.log("Market stats:", stats);
-            console.log("7. Getting player data...");
-            const playerData = await api.getPlayer("123", "456");
-            console.log("Player data:", playerData);
-            console.log("8. Getting bet history...");
-            const allBets = await api.getAllBets();
-            console.log(`Total bets: ${allBets.length}`);
-            const playerBets = await api.getPlayerBets("123", "456");
-            console.log(`Player bets: ${playerBets.length}`);
-            if (!marketData.resolved) {
-                console.log("9. Admin resolves market...");
+            console.log("9. Getting updated player data...");
+            const updatedPlayerData = await rpc.queryState(player.processingKey);
+            console.log("Updated player data:", updatedPlayerData);
+            if (!market.resolved) {
+                console.log("10. Admin resolves market...");
                 await admin.resolveMarket(true); // YES outcome
-                console.log("10. Player claims winnings...");
+                console.log("11. Player claims winnings...");
                 await player.claimWinnings();
-                console.log("11. Player withdraws funds...");
+                console.log("12. Player withdraws funds...");
                 await player.withdrawFunds(500n, 0n, 0n);
             }
+        }
+        else {
+            console.log("No player/market data available");
         }
         console.log("=== Test completed successfully ===");
     }
@@ -150,8 +201,8 @@ async function runExamples() {
     try {
         await testPredictionMarket();
         console.log("\n" + "=".repeat(50));
-        console.log("Running additional examples...\n");
-        await exampleUsage();
+        // console.log("Running additional examples...\n");
+        // await exampleUsage();
     }
     catch (error) {
         console.error("Examples failed:", error);

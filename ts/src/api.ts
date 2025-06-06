@@ -106,7 +106,7 @@ export class Player extends PlayerConvention {
 
     async depositFunds(amount: bigint, targetPid1: bigint, targetPid2: bigint) {
         let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, amount]);
+        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, 0n, amount]);
         return await this.sendTransactionWithCommand(cmd);
     }
 

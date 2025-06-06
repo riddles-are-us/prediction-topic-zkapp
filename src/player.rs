@@ -1,8 +1,9 @@
 use serde::Serialize;
 use zkwasm_rest_abi::StorageData;
 use crate::error::*;
+use crate::state::GLOBAL_STATE;
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, Default)]
 pub struct PlayerData {
     pub balance: u64,
     pub yes_shares: u64,
@@ -10,13 +11,32 @@ pub struct PlayerData {
     pub claimed: bool,
 }
 
-impl Default for PlayerData {
-    fn default() -> Self {
-        Self {
-            balance: 0,
-            yes_shares: 0,
-            no_shares: 0,
-            claimed: false,
+#[derive(Serialize, Clone, Debug)]
+pub struct PredictionMarketPlayer {
+    pub player_id: [u64; 2],
+    pub nonce: u64,
+    pub data: PlayerData,
+}
+
+impl PredictionMarketPlayer {
+    pub fn get(pkey: &[u64; 4]) -> Option<Self> {
+        let player_id = Player::pkey_to_pid(pkey);
+        let player = Player::get_from_pid(&player_id);
+        
+        match player {
+            Some(player) => Some(PredictionMarketPlayer {
+                player_id,
+                nonce: player.nonce,
+                data: player.data,
+            }),
+            None => {
+                // Return default player with global info
+                Some(PredictionMarketPlayer {
+                    player_id,
+                    nonce: 0,
+                    data: PlayerData::default(),
+                })
+            }
         }
     }
 }
