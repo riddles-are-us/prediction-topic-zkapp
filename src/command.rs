@@ -73,6 +73,7 @@ pub enum Activity {
     Sell(u64, u64), // sell_type, shares_amount
     Resolve(u64),   // outcome
     Claim,          // claim winnings
+    WithdrawFees,   // withdraw collected fees (admin only)
 }
 
 impl CommandHandler for Activity {
@@ -95,6 +96,10 @@ impl CommandHandler for Activity {
                     },
                     Activity::Claim => {
                         Self::handle_claim(player, counter)
+                    },
+                    Activity::WithdrawFees => {
+                        // Only admin can withdraw fees - we need to check this at a higher level
+                        Self::handle_withdraw_fees(player, counter)
                     }
                 }
             }
@@ -199,6 +204,7 @@ impl Activity {
         let mut global_state = GLOBAL_STATE.0.borrow_mut();
         let current_time = global_state.counter;
 
+        // TODO: Uncomment this when production is ready
         // if !global_state.market.can_resolve(current_time) {
         //     return Err(ERROR_MARKET_NOT_RESOLVED);
         // }
@@ -243,6 +249,34 @@ impl Activity {
 
         // Emit player update event
         Self::emit_player_event(&player);
+
+        Ok(())
+    }
+
+    fn handle_withdraw_fees(player: &mut Player, _counter: u64) -> Result<(), u32> {
+        let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        
+        let fees_collected = global_state.market.total_fees_collected;
+        
+        if fees_collected == 0 {
+            return Err(ERROR_NO_WINNING_POSITION); // Reuse this error for "no fees to withdraw"
+        }
+
+        // Transfer fees to admin's balance
+        player.data.add_balance(fees_collected);
+        
+        // Reset collected fees to zero
+        global_state.market.total_fees_collected = 0;
+
+        // Release the borrow before emitting events
+        drop(global_state);
+
+        // Store updated player data
+        player.store();
+
+        // Emit events
+        Self::emit_player_event(&player);
+        Self::emit_market_event();
 
         Ok(())
     }

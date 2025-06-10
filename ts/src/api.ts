@@ -180,7 +180,7 @@ export class PredictionMarketAPI {
     calculateExpectedShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
         if (amount <= 0) return 0n;
 
-        const PLATFORM_FEE_RATE = 25n; // 0.25%
+        const PLATFORM_FEE_RATE = 100n; // 1%
         const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / 10000n;
         const netAmount = BigInt(amount) - fee;
 
@@ -201,7 +201,7 @@ export class PredictionMarketAPI {
     calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
         if (shares <= 0) return 0n;
 
-        const PLATFORM_FEE_RATE = 25n; // 0.25%
+        const PLATFORM_FEE_RATE = 100n; // 1%
         const k = yesLiquidity * noLiquidity;
 
         if (sellType === 1) { // Sell YES shares
@@ -265,7 +265,7 @@ export class PredictionMarketAPI {
         }
 
         // Simulate the trade
-        const PLATFORM_FEE_RATE = 25n; // 0.25%
+        const PLATFORM_FEE_RATE = 100n; // 1%
         const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / 10000n;
         const netAmount = BigInt(amount) - fee;
 

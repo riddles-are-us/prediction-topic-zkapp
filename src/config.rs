@@ -38,7 +38,7 @@ pub const EVENT_BET_UPDATE: u64 = 2;
 pub const EVENT_PLAYER_UPDATE: u64 = 3;
 
 // Market constants
-pub const PLATFORM_FEE_RATE: u64 = 25; // 0.25% platform fee (25/10000)
+pub const PLATFORM_FEE_RATE: u64 = 100; // 1% platform fee (100/10000)
 
 // Price precision constants
 pub const BASIS_POINTS_PRECISION: u64 = 10000;     // 10,000 basis points = 100%

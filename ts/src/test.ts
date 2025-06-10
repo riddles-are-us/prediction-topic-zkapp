@@ -15,6 +15,7 @@ const BET = 4;
 const SELL = 5;
 const RESOLVE = 6;
 const CLAIM = 7;
+const WITHDRAW_FEES = 8;
 
 class Player extends PlayerConvention {
     constructor(key: string, rpc: ZKWasmAppRpc) {
@@ -62,7 +63,7 @@ class Player extends PlayerConvention {
 
     async withdrawFunds(amount: bigint, addressHigh: bigint, addressLow: bigint) {
         let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(WITHDRAW), [amount, addressHigh, addressLow]);
+        let cmd = createCommand(nonce, BigInt(WITHDRAW), [0n, amount, addressHigh, addressLow]);
         return await this.sendTransactionWithCommand(cmd);
     }
 
@@ -76,6 +77,49 @@ class Player extends PlayerConvention {
         let nonce = await this.getNonce();
         let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
         return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async withdrawFees() {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW_FEES), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async sellShares(sellType: number, shares: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+}
+
+// Helper function to log player and market state
+async function logStateInfo(rpc: any, player: Player, playerName: string, stepDescription: string) {
+    console.log(`\n=== ${stepDescription} - ${playerName} State ===`);
+    
+    try {
+        const playerDataResponse: any = await rpc.queryState(player.processingKey);
+        const playerData = JSON.parse(playerDataResponse.data);
+        
+        if (playerData && playerData.player && playerData.state) {
+            const playerInfo = playerData.player.data;
+            const marketInfo = playerData.state.market;
+            
+            console.log(`${playerName} Balance: ${playerInfo.balance}`);
+            console.log(`${playerName} YES Shares: ${playerInfo.yes_shares}`);
+            console.log(`${playerName} NO Shares: ${playerInfo.no_shares}`);
+            console.log(`${playerName} Claimed: ${playerInfo.claimed}`);
+            
+            console.log(`Market YES Liquidity: ${marketInfo.yes_liquidity}`);
+            console.log(`Market NO Liquidity: ${marketInfo.no_liquidity}`);
+            console.log(`Market Total Volume: ${marketInfo.total_volume}`);
+            console.log(`Market Total Fees: ${marketInfo.total_fees_collected}`);
+            console.log(`Market Resolved: ${marketInfo.resolved}`);
+            if (marketInfo.resolved) {
+                console.log(`Market Outcome: ${marketInfo.outcome ? 'YES' : 'NO'}`);
+            }
+        }
+    } catch (error) {
+        console.log(`Error getting ${playerName} state:`, error);
     }
 }
 
@@ -107,7 +151,7 @@ function testAMMCalculations() {
 }
 
 async function testPredictionMarket() {
-    console.log("=== Prediction Market Test ===");
+    console.log("=== Enhanced Prediction Market Test with Two Players ===");
     
     const api = new PredictionMarketAPI();
     const rpc = new ZKWasmAppRpc("http://localhost:3000");
@@ -117,116 +161,213 @@ async function testPredictionMarket() {
     if (!adminKey) {
         throw new Error("SERVER_ADMIN_KEY environment variable is required");
     }
-    const playerKey = "456789789";
+    const player1Key = "456789789";
+    const player2Key = "987654321";
     
     console.log("Admin key from env:", adminKey);
     
     try {
         // Create player instances
         const admin = new Player(adminKey, rpc);
-        const player = new Player(playerKey, rpc);
+        const player1 = new Player(player1Key, rpc);
+        const player2 = new Player(player2Key, rpc);
         
-        // Get admin's public key to verify it matches
-        let adminPkey = PrivateKey.fromString(admin.processingKey);
-        let adminPubkey = adminPkey.publicKey.key.x.v;
-        let adminLeHexBN = new LeHexBN(bnToHexLe(adminPubkey));
-        let adminPkeyArray = adminLeHexBN.toU64Array();
+        // Get player PIDs for deposits
+        let player1Pkey = PrivateKey.fromString(player1.processingKey);
+        let player1Pubkey = player1Pkey.publicKey.key.x.v;
+        let player1LeHexBN = new LeHexBN(bnToHexLe(player1Pubkey));
+        let player1PkeyArray = player1LeHexBN.toU64Array();
         
-        console.log("Admin public key array:", adminPkeyArray);
+        let player2Pkey = PrivateKey.fromString(player2.processingKey);
+        let player2Pubkey = player2Pkey.publicKey.key.x.v;
+        let player2LeHexBN = new LeHexBN(bnToHexLe(player2Pubkey));
+        let player2PkeyArray = player2LeHexBN.toU64Array();
         
-        // Get player's private key and pid
-        let pkey = PrivateKey.fromString(player.processingKey);
-        let pubkey = pkey.publicKey.key.x.v;
-        let leHexBN = new LeHexBN(bnToHexLe(pubkey));
-        let pkeyArray = leHexBN.toU64Array();
-        let playerpid = pkeyArray;
+        console.log("Player1 PID:", player1PkeyArray);
+        console.log("Player2 PID:", player2PkeyArray);
         
-        console.log("Player PID:", playerpid);
+        // Step 1: Install all players
+        console.log("\n=== STEP 1: Installing Players ===");
         
-        console.log("1. Installing admin...");
         try {
             await admin.installPlayer();
+            console.log("Admin installed successfully");
         } catch (e) {
             if (e instanceof Error && e.message === "PlayerAlreadyExists") {
-                console.log("Admin already exists, continuing...");
+                console.log("Admin already exists");
             } else {
                 throw e;
             }
         }
         
-        console.log("2. Installing players...");
         try {
-            await player.installPlayer();
+            await player1.installPlayer();
+            console.log("Player1 installed successfully");
         } catch (e) {
             if (e instanceof Error && e.message === "PlayerAlreadyExists") {
-                console.log("Player already exists, continuing...");
+                console.log("Player1 already exists");
             } else {
                 throw e;
             }
         }
         
-        console.log("3. Admin deposits funds for player...", pkeyArray[1], pkeyArray[2]);
-        console.log(admin.processingKey)
-        await admin.depositFunds(10000n, pkeyArray[1], pkeyArray[2]); // Deposit 10000 units for player
-        
-        console.log("4. Getting player data (includes market info)...");
-        const playerDataResponse: any = await rpc.queryState(player.processingKey);
-        console.log("Player data with market info:", playerDataResponse);
-        
-        // Parse the JSON string from the data field
-        const playerData = JSON.parse(playerDataResponse.data);
-        
-        if (playerData && playerData.state && playerData.state.market) {
-            const market = playerData.state.market;
-            const yesLiquidity = BigInt(market.yes_liquidity);
-            const noLiquidity = BigInt(market.no_liquidity);
-            
-            console.log("5. Market info:");
-            console.log(`- Title: ${market.title}`);
-            console.log(`- YES Liquidity: ${yesLiquidity}`);
-            console.log(`- NO Liquidity: ${noLiquidity}`);
-            console.log(`- Resolved: ${market.resolved}`);
-            
-            console.log("6. Player info:");
-            console.log(`- Balance: ${playerData.player.data.balance}`);
-            console.log(`- YES Shares: ${playerData.player.data.yes_shares}`);
-            console.log(`- NO Shares: ${playerData.player.data.no_shares}`);
-            
-            console.log("7. Calculating bet predictions...");
-            const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
-            const expectedNoShares = api.calculateExpectedShares(0, 1000, yesLiquidity, noLiquidity);
-            
-            console.log(`Expected shares for 1000 units:`);
-            console.log(`- YES bet: ${expectedYesShares} shares`);
-            console.log(`- NO bet: ${expectedNoShares} shares`);
-            
-            const prices = api.calculatePrices(yesLiquidity, noLiquidity);
-            console.log(`Current prices:`);
-            console.log(`- YES: ${(prices.yesPrice * 100).toFixed(2)}%`);
-            console.log(`- NO: ${(prices.noPrice * 100).toFixed(2)}%`);
-            
-            console.log("8. Player places bets...");
-            await player.placeBet(1, 1000n); // YES bet
-            await player.placeBet(0, 500n);  // NO bet
-            
-            console.log("9. Getting updated player data...");
-            const updatedPlayerDataResponse: any = await rpc.queryState(player.processingKey);
-            console.log("Updated player data:", updatedPlayerDataResponse);
-            const updatedPlayerData = JSON.parse(updatedPlayerDataResponse.data);
-            
-            if (!market.resolved) {
-                console.log("10. Admin resolves market...");
-                await admin.resolveMarket(true); // YES outcome
-                
-                console.log("11. Player claims winnings...");
-                await player.claimWinnings();
-                
-                console.log("12. Player withdraws funds...");
-                await player.withdrawFunds(500n, 0n, 0n);
+        try {
+            await player2.installPlayer();
+            console.log("Player2 installed successfully");
+        } catch (e) {
+            if (e instanceof Error && e.message === "PlayerAlreadyExists") {
+                console.log("Player2 already exists");
+            } else {
+                throw e;
             }
-        } else {
-            console.log("No player/market data available");
         }
+        
+        // Step 2: Admin deposits funds for both players
+        console.log("\n=== STEP 2: Admin Deposits Funds ===");
+        
+        await admin.depositFunds(5000n, player1PkeyArray[1], player1PkeyArray[2]);
+        console.log("Deposited 5000 for Player1");
+        await logStateInfo(rpc, player1, "Player1", "After Deposit");
+        
+        await admin.depositFunds(3000n, player2PkeyArray[1], player2PkeyArray[2]);
+        console.log("Deposited 3000 for Player2");
+        await logStateInfo(rpc, player2, "Player2", "After Deposit");
+        
+        // Step 3: Player1 places YES bets
+        console.log("\n=== STEP 3: Player1 Places YES Bets ===");
+        
+        try {
+            await player1.placeBet(1, 1000n); // YES bet
+            console.log("Player1 bet 1000 on YES");
+        } catch (error) {
+            console.log("Player1 first YES bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After First YES Bet");
+        
+        try {
+            await player1.placeBet(1, 500n); // Another YES bet
+            console.log("Player1 bet 500 more on YES");
+        } catch (error) {
+            console.log("Player1 second YES bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After Second YES Bet");
+        
+        // Step 4: Player2 places NO bets
+        console.log("\n=== STEP 4: Player2 Places NO Bets ===");
+        
+        try {
+            await player2.placeBet(0, 800n); // NO bet
+            console.log("Player2 bet 800 on NO");
+        } catch (error) {
+            console.log("Player2 first NO bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player2, "Player2", "After First NO Bet");
+        
+        try {
+            await player2.placeBet(0, 600n); // Another NO bet
+            console.log("Player2 bet 600 more on NO");
+        } catch (error) {
+            console.log("Player2 second NO bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player2, "Player2", "After Second NO Bet");
+        
+        // Step 5: Player1 places some NO bets too
+        console.log("\n=== STEP 5: Player1 Also Bets on NO ===");
+        
+        try {
+            await player1.placeBet(0, 700n); // NO bet
+            console.log("Player1 bet 700 on NO");
+        } catch (error) {
+            console.log("Player1 NO bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After NO Bet");
+        
+        // Step 6: Players sell some shares
+        console.log("\n=== STEP 6: Players Sell Some Shares ===");
+        
+        // Player1 sells some YES shares
+        try {
+            await player1.placeBet(1, 300n); // First buy more YES shares to have enough to sell
+            console.log("Player1 bought 300 more YES shares");
+        } catch (error) {
+            console.log("Player1 additional YES bet error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After Additional YES Purchase");
+        
+        // Now sell some YES shares (sell type 1 = YES)
+        try {
+            await player1.sellShares(1, 200n); // Sell 200 YES shares
+            console.log("Player1 sold 200 YES shares");
+        } catch (error) {
+            console.log("Player1 YES sell error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After Selling YES Shares");
+        
+        // Player2 sells some NO shares (sell type 0 = NO)
+        try {
+            await player2.sellShares(0, 150n); // Sell 150 NO shares
+            console.log("Player2 sold 150 NO shares");
+        } catch (error) {
+            console.log("Player2 NO sell error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player2, "Player2", "After Selling NO Shares");
+        
+        // Player1 also sells some NO shares
+        try {
+            await player1.sellShares(0, 100n); // Sell 100 NO shares
+            console.log("Player1 sold 100 NO shares");
+        } catch (error) {
+            console.log("Player1 NO sell error:", error instanceof Error ? error.message : error);
+        }
+        await logStateInfo(rpc, player1, "Player1", "After Selling NO Shares");
+        
+        // Step 7: Market resolution
+        console.log("\n=== STEP 7: Admin Resolves Market (YES Wins) ===");
+        
+        await admin.resolveMarket(true); // YES outcome
+        console.log("Market resolved: YES wins");
+        await logStateInfo(rpc, admin, "Admin", "After Market Resolution");
+        
+        // Step 8: Players claim winnings
+        console.log("\n=== STEP 8: Players Claim Winnings ===");
+        
+        try {
+            await player1.claimWinnings();
+            console.log("Player1 claimed winnings");
+        } catch (error) {
+            if (error instanceof Error && error.message === "NoWinningPosition") {
+                console.log("Player1 has no winning position to claim");
+            } else {
+                console.log("Player1 claim error:", error);
+            }
+        }
+        await logStateInfo(rpc, player1, "Player1", "After Claiming Attempt");
+        
+        try {
+            await player2.claimWinnings();
+            console.log("Player2 claimed winnings");
+        } catch (error) {
+            if (error instanceof Error && error.message === "NoWinningPosition") {
+                console.log("Player2 has no winning position to claim");
+            } else {
+                console.log("Player2 claim error:", error);
+            }
+        }
+        await logStateInfo(rpc, player2, "Player2", "After Claiming Attempt");
+        
+        // Step 9: Admin withdraws fees
+        console.log("\n=== STEP 9: Admin Withdraws Fees ===");
+        
+        await admin.withdrawFees();
+        console.log("Admin withdrew collected fees");
+        await logStateInfo(rpc, admin, "Admin", "After Fee Withdrawal");
+        
+        // Step 10: Final state of all participants
+        console.log("\n=== STEP 10: Final State Summary ===");
+        
+        await logStateInfo(rpc, admin, "Admin", "Final State");
+        await logStateInfo(rpc, player1, "Player1", "Final State");
+        await logStateInfo(rpc, player2, "Player2", "Final State");
         
         console.log("=== Test completed successfully ===");
         

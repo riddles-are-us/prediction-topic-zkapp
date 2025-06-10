@@ -143,6 +143,7 @@ const BET: u64 = 4;
 const SELL: u64 = 5;
 const RESOLVE: u64 = 6;
 const CLAIM: u64 = 7;
+const WITHDRAW_FEES: u64 = 8;
 
 pub struct Transaction {
     command: crate::command::Command,
@@ -162,27 +163,29 @@ impl Transaction {
         let nonce = params[0] >> 16;
         
         let command = if command == WITHDRAW {
-            enforce(params.len() >= 5, "withdraw needs 5 params");
+            enforce(params.len() == 5, "withdraw needs 5 params");
             Command::Withdraw(Withdraw {
                 data: [params[2], params[3], params[4]]
             })
         } else if command == DEPOSIT {
-            enforce(params.len() >= 5, "deposit needs 5 params");
+            enforce(params.len() == 5, "deposit needs 5 params");
             enforce(params[3] == 0, "check deposit index"); // only token index 0 is supported
             Command::Deposit(Deposit {
                 data: [params[1], params[2], params[4]]
             })
         } else if command == BET {
-            enforce(params.len() >= 3, "bet needs 3 params");
+            enforce(params.len() == 3, "bet needs 3 params");
             Command::Activity(Activity::Bet(params[1], params[2]))
         } else if command == SELL {
-            enforce(params.len() >= 3, "sell needs 3 params");
+            enforce(params.len() == 3, "sell needs 3 params");
             Command::Activity(Activity::Sell(params[1], params[2]))
         } else if command == RESOLVE {
-            enforce(params.len() >= 2, "resolve needs 2 params");
+            enforce(params.len() == 2, "resolve needs 2 params");
             Command::Activity(Activity::Resolve(params[1]))
         } else if command == CLAIM {
             Command::Activity(Activity::Claim)
+        } else if command == WITHDRAW_FEES {
+            Command::Activity(Activity::WithdrawFees)
         } else if command == INSTALL_PLAYER {
             Command::InstallPlayer
         } else {
@@ -238,8 +241,11 @@ impl Transaction {
             crate::command::Command::Withdraw(cmd) => cmd.handle(&pid, self.nonce, rand, counter)
                 .map_or_else(|e| e, |_| 0),
             crate::command::Command::Activity(cmd) => {
-                // Check admin permissions for resolve command
+                // Check admin permissions for resolve and withdraw fees commands
                 if let Activity::Resolve(_) = cmd {
+                    unsafe { require(*pkey == *ADMIN_PUBKEY) };
+                }
+                if let Activity::WithdrawFees = cmd {
                     unsafe { require(*pkey == *ADMIN_PUBKEY) };
                 }
                 cmd.handle(&pid, self.nonce, rand, counter)
