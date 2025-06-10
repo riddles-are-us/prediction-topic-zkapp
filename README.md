@@ -47,13 +47,40 @@ Uses constant product formula (x * y = k) for automated market making:
 > 
 > 🔢 For precision constants and calculation accuracy, see [PRECISION_CONSTANTS.md](PRECISION_CONSTANTS.md)
 
-## API Endpoints
+## Data Access
 
-- `GET /data/market` - Get market information
-- `GET /data/player/:pid1/:pid2` - Get player information
-- `GET /data/bets` - Get all betting records
-- `GET /data/bets/:pid1/:pid2` - Get specific player's betting records
-- `GET /data/stats` - Get market statistics
+All data is now accessed directly via RPC queries to the state:
+
+- **Player State**: `rpc.queryState(playerKey)` - Returns unified player data including market information
+- **Market Data**: Included in player state response under `state.market`
+
+### Data Structure
+```typescript
+// Player state response
+{
+  player: {
+    player_id: [u64, u64],
+    data: {
+      balance: string,
+      yes_shares: string, 
+      no_shares: string,
+      claimed: boolean,
+      nonce: string
+    }
+  },
+  state: {
+    market: {
+      title: string,
+      yes_liquidity: string,
+      no_liquidity: string,
+      total_volume: string,
+      resolved: boolean,
+      outcome: boolean,
+      total_fees_collected: string
+    }
+  }
+}
+```
 
 ## Transaction Commands
 
@@ -82,25 +109,23 @@ Uses constant product formula (x * y = k) for automated market making:
 TypeScript API provides convenient transaction building functions:
 
 ```typescript
-import { 
-    buildBetTransaction,
-    buildSellTransaction,
-    buildResolveTransaction, 
-    buildClaimTransaction,
-    buildWithdrawTransaction,
-    buildDepositTransaction,
-    buildWithdrawFeesTransaction
-} from './api.js';
+import { Player, PredictionMarketAPI } from './api.js';
+import { ZKWasmAppRpc } from 'zkwasm-minirollup-rpc';
 
-// Bet transaction
-const betTx = buildBetTransaction(nonce, 1, 1000n); // YES bet, 1000 units
+// Initialize RPC and Player
+const rpc = new ZKWasmAppRpc("http://localhost:3000");
+const player = new Player("player_private_key", rpc);
+const api = new PredictionMarketAPI();
 
-// Sell transaction
-const sellTx = buildSellTransaction(nonce, 1, 500n); // Sell 500 YES shares
+// Get player and market data
+const playerData = await rpc.queryState(player.processingKey);
+const parsedData = JSON.parse(playerData.data);
+const marketInfo = parsedData.state.market;
+const playerInfo = parsedData.player.data;
 
-// Price calculation examples
-const yesLiquidity = BigInt(marketData.yesLiquidity);
-const noLiquidity = BigInt(marketData.noLiquidity);
+// Price calculations using market data
+const yesLiquidity = BigInt(marketInfo.yes_liquidity);
+const noLiquidity = BigInt(marketInfo.no_liquidity);
 
 // Get current market prices
 const prices = api.calculatePrices(yesLiquidity, noLiquidity);
@@ -115,20 +140,17 @@ console.log(`YES buy price: ${buyPrice}, sell price: ${sellPrice}`);
 const impact = api.calculateMarketImpact(1, 10000, yesLiquidity, noLiquidity);
 const slippage = api.calculateSlippage(1, 10000, yesLiquidity, noLiquidity);
 
-// Resolve market transaction (admin)
-const resolveTx = buildResolveTransaction(nonce, true); // YES outcome
+// Transaction examples
+await player.placeBet(1, 1000n); // YES bet, 1000 units
+await player.sellShares(1, 500n); // Sell 500 YES shares
+await player.claimWinnings(); // Claim rewards
+await player.withdrawFunds(1000n, 0n, 0n); // Withdraw funds
 
-// Claim rewards transaction
-const claimTx = buildClaimTransaction(nonce);
-
-// Withdraw transaction
-const withdrawTx = buildWithdrawTransaction(nonce, 1000n, 0n, 0n);
-
-// Deposit transaction (admin)
-const depositTx = buildDepositTransaction(nonce, pid1, pid2, 0n, 1000n);
-
-// Withdraw fees transaction (admin)
-const withdrawFeesTx = buildWithdrawFeesTransaction(nonce);
+// Admin operations (requires admin key)
+const admin = new Player("admin_private_key", rpc);
+await admin.depositFunds(1000n, targetPid1, targetPid2); // Deposit for player
+await admin.resolveMarket(true); // Resolve market (YES outcome)
+await admin.withdrawFees(); // Withdraw collected fees
 ```
 
 ## Build and Run
