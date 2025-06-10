@@ -12,8 +12,9 @@ const INSTALL_PLAYER = 1;
 const WITHDRAW = 2;
 const DEPOSIT = 3;
 const BET = 4;
-const RESOLVE = 5;
-const CLAIM = 6;
+const SELL = 5;
+const RESOLVE = 6;
+const CLAIM = 7;
 
 class Player extends PlayerConvention {
     constructor(key: string, rpc: ZKWasmAppRpc) {
@@ -166,14 +167,17 @@ async function testPredictionMarket() {
         
         console.log("3. Admin deposits funds for player...", pkeyArray[1], pkeyArray[2]);
         console.log(admin.processingKey)
-        await admin.depositFunds(1000n, pkeyArray[1], pkeyArray[2]); // Deposit 10000 units for player
+        await admin.depositFunds(10000n, pkeyArray[1], pkeyArray[2]); // Deposit 10000 units for player
         
         console.log("4. Getting player data (includes market info)...");
-        const playerData: any = await rpc.queryState(player.processingKey);
-        console.log("Player data with market info:", playerData);
+        const playerDataResponse: any = await rpc.queryState(player.processingKey);
+        console.log("Player data with market info:", playerDataResponse);
         
-        if (playerData && playerData.market) {
-            const market = playerData.market;
+        // Parse the JSON string from the data field
+        const playerData = JSON.parse(playerDataResponse.data);
+        
+        if (playerData && playerData.state && playerData.state.market) {
+            const market = playerData.state.market;
             const yesLiquidity = BigInt(market.yes_liquidity);
             const noLiquidity = BigInt(market.no_liquidity);
             
@@ -184,9 +188,9 @@ async function testPredictionMarket() {
             console.log(`- Resolved: ${market.resolved}`);
             
             console.log("6. Player info:");
-            console.log(`- Balance: ${playerData.data.balance}`);
-            console.log(`- YES Shares: ${playerData.data.yes_shares}`);
-            console.log(`- NO Shares: ${playerData.data.no_shares}`);
+            console.log(`- Balance: ${playerData.player.data.balance}`);
+            console.log(`- YES Shares: ${playerData.player.data.yes_shares}`);
+            console.log(`- NO Shares: ${playerData.player.data.no_shares}`);
             
             console.log("7. Calculating bet predictions...");
             const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
@@ -206,8 +210,9 @@ async function testPredictionMarket() {
             await player.placeBet(0, 500n);  // NO bet
             
             console.log("9. Getting updated player data...");
-            const updatedPlayerData: any = await rpc.queryState(player.processingKey);
-            console.log("Updated player data:", updatedPlayerData);
+            const updatedPlayerDataResponse: any = await rpc.queryState(player.processingKey);
+            console.log("Updated player data:", updatedPlayerDataResponse);
+            const updatedPlayerData = JSON.parse(updatedPlayerDataResponse.data);
             
             if (!market.resolved) {
                 console.log("10. Admin resolves market...");
