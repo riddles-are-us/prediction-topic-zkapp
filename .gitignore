@@ -4,3 +4,6 @@ pkg/
 ts/dist/
 ts/node_modules/ 
 .env
+**/node_modules
+**/*.js.map
+**/*.js
