@@ -9,10 +9,12 @@ A simple zkWasm-based prediction market application focused on single-topic pred
 - **Buy/Sell Operations**: Users can buy and sell Yes/No shares with continuous liquidity
 - **Real-time Pricing**: Advanced price calculation functions for buy/sell operations
 - **Market Impact Analysis**: Calculate slippage and price impact before trading
+- **Fee Management**: Platform collects 1% fee on all transactions, admin can withdraw collected fees
 - **Time Management**: Set market start, end, and resolution times
 - **Automatic Settlement**: Users can claim rewards after market resolution
 - **Deposit/Withdraw**: Admins can deposit funds for players, players can withdraw funds
 - **Event System**: Real-time event notifications and state synchronization
+- **Robust Error Handling**: Graceful error handling for edge cases like NoWinningPosition
 
 ## Technical Architecture
 
@@ -39,7 +41,7 @@ Uses constant product formula (x * y = k) for automated market making:
 - Initial liquidity: Yes = 1,000,000, No = 1,000,000
 - Price calculation: Yes price = No liquidity / (Yes liquidity + No liquidity)
 - Buy/sell operations: Continuous liquidity with automatic price adjustment
-- Platform fee: 0.25% on all transactions
+- Platform fee: 1% on all transactions
 
 > 📊 For detailed calculation examples with specific numbers, see [AMM_CALCULATION_EXAMPLES.md](AMM_CALCULATION_EXAMPLES.md)
 > 
@@ -60,11 +62,12 @@ Uses constant product formula (x * y = k) for automated market making:
 | 0 | TICK | None | Admin |
 | 1 | INSTALL_PLAYER | None | Any user |
 | 2 | WITHDRAW | amount, address_high, address_low | Player |
-| 3 | DEPOSIT | target_pid1, target_pid2, amount | Admin |
+| 3 | DEPOSIT | target_pid1, target_pid2, token_index, amount | Admin |
 | 4 | BET | bet_type (0=NO, 1=YES), amount | Player |
 | 5 | SELL | sell_type (0=NO, 1=YES), shares | Player |
 | 6 | RESOLVE | outcome (0=NO, 1=YES) | Admin |
 | 7 | CLAIM | None | Player |
+| 8 | WITHDRAW_FEES | None | Admin |
 
 ## Event Types
 
@@ -85,7 +88,8 @@ import {
     buildResolveTransaction, 
     buildClaimTransaction,
     buildWithdrawTransaction,
-    buildDepositTransaction 
+    buildDepositTransaction,
+    buildWithdrawFeesTransaction
 } from './api.js';
 
 // Bet transaction
@@ -121,7 +125,10 @@ const claimTx = buildClaimTransaction(nonce);
 const withdrawTx = buildWithdrawTransaction(nonce, 1000n, 0n, 0n);
 
 // Deposit transaction (admin)
-const depositTx = buildDepositTransaction(nonce, pid1, pid2, 1000n);
+const depositTx = buildDepositTransaction(nonce, pid1, pid2, 0n, 1000n);
+
+// Withdraw fees transaction (admin)
+const withdrawFeesTx = buildWithdrawFeesTransaction(nonce);
 ```
 
 ## Build and Run
@@ -142,22 +149,25 @@ make clean
 
 ## Project Features
 
-- **Standardized Architecture**: Follows zkwasm project best practices
-- **Simplified Deposit/Withdraw**: Uses standard Withdraw/Deposit command structures
+- **Standardized Architecture**: Follows zkwasm project best practices with unified player state structure
+- **Simplified Deposit/Withdraw**: Uses standard Withdraw/Deposit command structures with proper token indexing
 - **Event-Driven**: Complete event system supports real-time updates
 - **Type Safety**: TypeScript interfaces ensure type safety
 - **Easy Maintenance**: Modular design with separation of concerns
-- **Complete Functionality**: Includes betting, AMM pricing, deposit/withdraw, market resolution and reward claiming
+- **Complete Functionality**: Includes betting, selling, AMM pricing, deposit/withdraw, market resolution, reward claiming, and fee collection
+- **Comprehensive Testing**: Multi-player testing with detailed state logging and error handling
+- **Fee Management**: Platform fee collection (1%) with admin withdrawal capability
 
 ## Market Lifecycle
 
 1. **Initialization**: Automatically create preset market when system starts (counter = 0)
 2. **Funding Phase**: Admin deposits funds for players
-3. **Active Period**: Users can purchase Yes/No shares
+3. **Active Period**: Users can purchase and sell Yes/No shares
 4. **End Period**: Stop accepting new bets
 5. **Resolution Period**: Admin sets final result
-6. **Claiming Period**: Winning users claim rewards
-7. **Withdrawal Period**: Users can withdraw remaining funds
+6. **Claiming Period**: Winning users claim rewards 
+7. **Fee Collection**: Admin withdraws collected platform fees
+8. **Withdrawal Period**: Users can withdraw remaining funds
 
 ## Configuration System
 
