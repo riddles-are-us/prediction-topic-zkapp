@@ -1,7 +1,7 @@
 import { Express } from "express";
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { Bet, BetModel, Market, MarketModel, Player, PlayerModel, docToJSON } from "./models.js";
+import { BetEvent, BetModel, Market, MarketModel, PlayerEvent, PlayerModel, docToJSON } from "./models.js";
 import mongoose from 'mongoose';
 
 const service = new Service(eventCallback, batchedCallback, extra);
@@ -131,7 +131,7 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
             case EVENT_BET_UPDATE:
                 {
                     console.log("bet update event");
-                    let bet = Bet.fromEvent(eventData);
+                    let bet = BetEvent.fromEvent(eventData);
                     let doc = new BetModel(bet.toObject());
                     await doc.save();
                     console.log("saved bet", bet);
@@ -140,10 +140,10 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
             case EVENT_PLAYER_UPDATE:
                 {
                     console.log("player update event");
-                    let player = Player.fromEvent(eventData);
+                    let player = PlayerEvent.fromEvent(eventData).toObject();
                     await PlayerModel.findOneAndUpdate(
-                        { pid1: player.pid1, pid2: player.pid2 },
-                        player.toObject(),
+                        { pid: player.pid},
+                        player,
                         { upsert: true }
                     );
                     console.log("saved player update", player);

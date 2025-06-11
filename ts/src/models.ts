@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { ObjectEvent } from 'zkwasm-ts-server';
 
 (BigInt.prototype as any).toJSON = function () {
     return BigInt.asUintN(64, this).toString();
@@ -34,7 +35,7 @@ const marketSchema = new mongoose.Schema({
 });
 
 // Player Schema
-interface Player {
+export interface Player {
     pid: bigint[],
     balance: bigint,
     yesShares: bigint,
@@ -48,8 +49,9 @@ const playerSchema = new mongoose.Schema<Player>({
     noShares: { type: BigInt, required: true },
     claimed: { type: Boolean, required: true }
 });
+playerSchema.pre('init', ObjectEvent.uint64FetchPlugin);
 
-interface Bet {
+export interface Bet {
     pid: bigint[],
     betType: number,
     amount: bigint,
@@ -66,6 +68,8 @@ const betSchema = new mongoose.Schema<Bet>({
     shares: { type: BigInt, required: true },
     timestamp: { type: Date, default: Date.now }
 });
+
+betSchema.pre('init', ObjectEvent.uint64FetchPlugin);
 
 // Create indexes
 playerSchema.index({ pid1: 1, pid2: 1 }, { unique: true });
