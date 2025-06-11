@@ -187,7 +187,7 @@ make clean
 3. **Active Period**: Users can purchase and sell Yes/No shares
 4. **End Period**: Stop accepting new bets
 5. **Resolution Period**: Admin sets final result
-6. **Claiming Period**: Winning users claim rewards 
+6. **Claiming Period**: Winning users claim rewards
 7. **Fee Collection**: Admin withdraws collected platform fees
 8. **Withdrawal Period**: Users can withdraw remaining funds
 

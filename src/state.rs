@@ -2,7 +2,6 @@ use serde::Serialize;
 use zkwasm_rest_abi::{StorageData, MERKLE_MAP};
 use std::cell::RefCell;
 use crate::market::MarketData;
-use crate::player::PlayerData;
 use crate::config::DEFAULT_MARKET;
 
 #[derive(Serialize)]

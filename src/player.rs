@@ -1,7 +1,6 @@
 use serde::Serialize;
 use zkwasm_rest_abi::StorageData;
 use crate::error::*;
-use crate::state::GLOBAL_STATE;
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct PlayerData {

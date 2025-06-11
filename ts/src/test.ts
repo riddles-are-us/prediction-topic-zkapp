@@ -38,8 +38,8 @@ class Player extends PlayerConvention {
 
     async installPlayer() {
         try {
-            let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
-            return await this.sendTransactionWithCommand(cmd);
+        let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
+        return await this.sendTransactionWithCommand(cmd);
         } catch (e) {
             if (e instanceof Error && e.message === "PlayerAlreadyExists") {
                 console.log("Player already exists, skipping installation");
@@ -190,7 +190,7 @@ async function testPredictionMarket() {
         console.log("\n=== STEP 1: Installing Players ===");
         
         try {
-            await admin.installPlayer();
+        await admin.installPlayer();
             console.log("Admin installed successfully");
         } catch (e) {
             if (e instanceof Error && e.message === "PlayerAlreadyExists") {
@@ -324,7 +324,7 @@ async function testPredictionMarket() {
         // Step 7: Market resolution
         console.log("\n=== STEP 7: Admin Resolves Market (YES Wins) ===");
         
-        await admin.resolveMarket(true); // YES outcome
+                await admin.resolveMarket(true); // YES outcome
         console.log("Market resolved: YES wins");
         await logStateInfo(rpc, admin, "Admin", "After Market Resolution");
         
