@@ -1,7 +1,8 @@
 import { Express } from "express";
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { Bet, BetModel, Market, MarketModel, Player, PlayerModel } from "./models.js";
+import { Bet, BetModel, Market, MarketModel, Player, PlayerModel, docToJSON } from "./models.js";
+import mongoose from 'mongoose';
 
 const service = new Service(eventCallback, batchedCallback, extra);
 await service.initialize();
@@ -9,6 +10,58 @@ await service.initialize();
 let txStateManager = new TxStateManager(merkleRootToBeHexString(service.merkleRoot));
 
 function extra(app: Express) {
+  // Fetch the market data event start from [timestamp] with limit
+  app.get("/data/market/:timestamp", async (req: any, res) => {
+    try {
+      let limit = req.params.limit;
+      if (!limit) {
+          limit = 100;
+      }
+      const doc = await MarketModel.find().limit(limit)
+      let data = doc.map((d) => {
+        return docToJSON(d);
+      });
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log(e);
+      res.status(500).send();
+    }
+  });
+
+  app.get("/data/history/:pid1/:pid2", async (req: any, res) => {
+    try {
+      let pid1 = req.params.pid1;
+      let pid2 = req.params.pid2;
+      const skip = parseInt(req.query.skip) || 0;
+      const limit = parseInt(req.query.limit) || 30;
+      const [count, doc] = await Promise.all([
+        BetModel.countDocuments({
+          "pid": [pid1, pid2],
+        }),
+        BetModel.find({
+          "pid": [pid1, pid2],
+        })
+          .skip(skip)
+          .limit(limit),
+      ]);
+
+      let data = doc.map((d: mongoose.Document) => {
+        return docToJSON(d);
+      });
+      res.status(201).send({
+        success: true,
+        data: data,
+        count: count,
+      });
+    } catch (e) {
+      console.log(e);
+      res.status(500).send();
+    }
+  });
+
     // All data is now accessed directly via RPC queries (rpc.queryState())
     // No HTTP API endpoints needed as data is fetched from blockchain state directly
 }

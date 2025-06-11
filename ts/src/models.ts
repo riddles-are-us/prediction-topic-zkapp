@@ -1,5 +1,21 @@
 import mongoose from 'mongoose';
 
+(BigInt.prototype as any).toJSON = function () {
+    return BigInt.asUintN(64, this).toString();
+};
+
+// With above tojson for bigint we can turn document into json with simple transform that exclude delete
+export function docToJSON(doc: mongoose.Document) {
+    const obj = doc.toObject({
+        transform: (_, ret:any) => {
+            delete ret._id;
+            return ret;
+        }
+    });
+    return obj;
+}
+
+
 // Market Schema
 const marketSchema = new mongoose.Schema({
     title: { type: String, required: true },
@@ -18,19 +34,33 @@ const marketSchema = new mongoose.Schema({
 });
 
 // Player Schema
-const playerSchema = new mongoose.Schema({
-    pid1: { type: String, required: true },
-    pid2: { type: String, required: true },
+interface Player {
+    pid: bigint[],
+    balance: bigint,
+    yesShares: bigint,
+    noShares: bigint,
+    claimed: boolean,
+}
+const playerSchema = new mongoose.Schema<Player>({
+    pid: { type: [BigInt], required: true },
     balance: { type: BigInt, required: true },
     yesShares: { type: BigInt, required: true },
     noShares: { type: BigInt, required: true },
     claimed: { type: Boolean, required: true }
 });
 
+interface Bet {
+    pid: bigint[],
+    betType: number,
+    amount: bigint,
+    shares: bigint,
+    timestamp: Date,
+
+}
+
 // Bet Schema
-const betSchema = new mongoose.Schema({
-    pid1: { type: String, required: true },
-    pid2: { type: String, required: true },
+const betSchema = new mongoose.Schema<Bet>({
+    pid: { type: [BigInt], required: true },
     betType: { type: Number, required: true }, // 0 = NO, 1 = YES
     amount: { type: BigInt, required: true },
     shares: { type: BigInt, required: true },
@@ -133,94 +163,55 @@ export class Market {
     }
 }
 
-export class Player {
-    pid1: string;
-    pid2: string;
-    balance: bigint;
-    yesShares: bigint;
-    noShares: bigint;
-    claimed: boolean;
+export class PlayerEvent {
+    index: number;
+    data: bigint[];
 
     constructor(
-        pid1: string,
-        pid2: string,
-        balance: bigint,
-        yesShares: bigint,
-        noShares: bigint,
-        claimed: boolean
+        index: number, data: bigint[]
     ) {
-        this.pid1 = pid1;
-        this.pid2 = pid2;
-        this.balance = balance;
-        this.yesShares = yesShares;
-        this.noShares = noShares;
-        this.claimed = claimed;
+        this.index = index;
+        this.data = data;
     }
 
-    static fromEvent(eventData: BigUint64Array): Player {
-        return new Player(
-            eventData[0].toString(), // pid1
-            eventData[1].toString(), // pid2
-            eventData[2], // balance
-            eventData[3], // yesShares
-            eventData[4], // noShares
-            eventData[5] !== 0n // claimed
-        );
+    static fromEvent(data: BigUint64Array): PlayerEvent {
+        return new PlayerEvent(Number(data[0]),  Array.from(data.slice(1)));
     }
 
-    toObject() {
+    toObject(): Player {
         return {
-            pid1: this.pid1,
-            pid2: this.pid2,
-            balance: this.balance,
-            yesShares: this.yesShares,
-            noShares: this.noShares,
-            claimed: this.claimed
+            pid: [this.data[0], this.data[1]], // pid2
+            balance: this.data[2], // balance
+            yesShares: this.data[3], // yesShares
+            noShares: this.data[4], // noShares
+            claimed: this.data[5] !== 0n // claimed
         };
     }
 }
 
-export class Bet {
-    pid1: string;
-    pid2: string;
-    betType: number;
-    amount: bigint;
-    shares: bigint;
+export class BetEvent {
+    index: number;
+    data: bigint[];
     timestamp: Date;
-
     constructor(
-        pid1: string,
-        pid2: string,
-        betType: number,
-        amount: bigint,
-        shares: bigint
+        index: number, data: bigint[]
     ) {
-        this.pid1 = pid1;
-        this.pid2 = pid2;
-        this.betType = betType;
-        this.amount = amount;
-        this.shares = shares;
+        this.index = index;
+        this.data = data;
         this.timestamp = new Date();
     }
 
-    static fromEvent(eventData: BigUint64Array): Bet {
-        return new Bet(
-            eventData[0].toString(), // pid1
-            eventData[1].toString(), // pid2
-            Number(eventData[2]), // betType
-            eventData[3], // amount
-            eventData[4] // shares
-        );
+    static fromEvent(data: BigUint64Array): BetEvent {
+        return new BetEvent(Number(data[0]),  Array.from(data.slice(1)));
     }
 
-    toObject() {
+    toObject(): Bet {
         return {
-            pid1: this.pid1,
-            pid2: this.pid2,
-            betType: this.betType,
-            amount: this.amount,
-            shares: this.shares,
+            pid: [this.data[0], this.data[1]], // pid2
+            betType: Number(this.data[2]), // betType
+            amount: this.data[3],
+            shares: this.data[4],
             timestamp: this.timestamp
         };
     }
-} 
+}
