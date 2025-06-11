@@ -2,6 +2,8 @@ use crate::error::*;
 use crate::event::{insert_event, EVENT_MARKET_UPDATE, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
+use crate::event::MarketEvent;
+use zkwasm_rest_abi::StorageData;
 
 #[derive(Clone)]
 pub enum Command {
@@ -114,12 +116,7 @@ impl Activity {
         }
 
         // Check if market is active
-        let mut global_state = GLOBAL_STATE.0.borrow_mut();
-        let current_time = global_state.counter;
-        
-        if !global_state.market.is_active(current_time) {
-            return Err(ERROR_MARKET_NOT_ACTIVE);
-        }
+        let current_time = GLOBAL_STATE.0.borrow_mut().ensure_active()?;
 
         // Check player balance
         player.data.spend_balance(amount)?;
@@ -127,26 +124,23 @@ impl Activity {
         // Place bet
         let shares = if bet_type == 1 {
             // YES bet
-            let shares = global_state.market.bet_yes(amount)?;
+            let shares = GLOBAL_STATE.0.borrow_mut().market.bet_yes(amount)?;
             player.data.add_yes_shares(shares);
             shares
         } else {
             // NO bet
-            let shares = global_state.market.bet_no(amount)?;
+            let shares = GLOBAL_STATE.0.borrow_mut().market.bet_no(amount)?;
             player.data.add_no_shares(shares);
             shares
         };
-
-        // Release the borrow before emitting events
-        drop(global_state);
 
         // Store updated data
         player.store();
 
         // Emit events
-        Self::emit_player_event(&player);
+        // Self::emit_player_event(&player);
         Self::emit_market_event();
-        Self::emit_bet_event(player.player_id, bet_type, amount, shares);
+        Self::emit_bet_event(player.player_id, bet_type, amount, shares, current_time);
 
         Ok(())
     }
@@ -157,12 +151,7 @@ impl Activity {
         }
 
         // Check if market is active
-        let mut global_state = GLOBAL_STATE.0.borrow_mut();
-        let current_time = global_state.counter;
-        
-        if !global_state.market.is_active(current_time) {
-            return Err(ERROR_MARKET_NOT_ACTIVE);
-        }
+        let current_time = GLOBAL_STATE.0.borrow_mut().ensure_active()?;
 
         // Check player has enough shares and sell
         let payout = if sell_type == 1 {
@@ -170,7 +159,7 @@ impl Activity {
             if player.data.yes_shares < shares {
                 return Err(ERROR_INSUFFICIENT_BALANCE);
             }
-            let payout = global_state.market.sell_yes(shares)?;
+            let payout = GLOBAL_STATE.0.borrow_mut().market.sell_yes(shares)?;
             player.data.yes_shares -= shares;
             payout
         } else {
@@ -178,7 +167,7 @@ impl Activity {
             if player.data.no_shares < shares {
                 return Err(ERROR_INSUFFICIENT_BALANCE);
             }
-            let payout = global_state.market.sell_no(shares)?;
+            let payout = GLOBAL_STATE.0.borrow_mut().market.sell_no(shares)?;
             player.data.no_shares -= shares;
             payout
         };
@@ -186,16 +175,13 @@ impl Activity {
         // Add payout to player balance
         player.data.balance += payout;
 
-        // Release the borrow before emitting events
-        drop(global_state);
-
         // Store updated data
         player.store();
 
         // Emit events
-        Self::emit_player_event(&player);
+        // Self::emit_player_event(&player);
         Self::emit_market_event();
-        Self::emit_sell_event(player.player_id, sell_type, shares, payout);
+        Self::emit_sell_event(player.player_id, sell_type, shares, payout, current_time);
 
         Ok(())
     }
@@ -248,7 +234,7 @@ impl Activity {
         drop(global_state);
 
         // Emit player update event
-        Self::emit_player_event(&player);
+        // Self::emit_player_event(&player);
 
         Ok(())
     }
@@ -275,7 +261,7 @@ impl Activity {
         player.store();
 
         // Emit events
-        Self::emit_player_event(&player);
+        // Self::emit_player_event(&player);
         Self::emit_market_event();
 
         Ok(())
@@ -295,25 +281,18 @@ impl Activity {
 
     fn emit_market_event() {
         let global_state = GLOBAL_STATE.0.borrow();
-        let mut data = vec![
-            global_state.market.yes_liquidity,
-            global_state.market.no_liquidity,
-            global_state.market.total_volume,
-            if global_state.market.resolved { 1 } else { 0 },
-            match global_state.market.outcome {
-                None => 0,
-                Some(false) => 1,
-                Some(true) => 2,
-            },
-            global_state.market.total_fees_collected,
-        ];
+        let market_event = MarketEvent::from(&global_state.market);
+        let mut data = Vec::with_capacity(3);
+        data.push(global_state.counter);
+        market_event.to_data(&mut data);
         insert_event(EVENT_MARKET_UPDATE, &mut data);
     }
 
-    fn emit_bet_event(player_id: [u64; 2], bet_type: u64, amount: u64, shares: u64) {
+    fn emit_bet_event(player_id: [u64; 2], bet_type: u64, amount: u64, shares: u64, counter: u64) {
         let mut data = vec![
             player_id[0],
             player_id[1],
+            counter,
             bet_type,
             amount,
             shares,
@@ -321,10 +300,11 @@ impl Activity {
         insert_event(EVENT_BET_UPDATE, &mut data);
     }
 
-    fn emit_sell_event(player_id: [u64; 2], sell_type: u64, shares: u64, payout: u64) {
+    fn emit_sell_event(player_id: [u64; 2], sell_type: u64, shares: u64, payout: u64, counter: u64) {
         let mut data = vec![
             player_id[0],
             player_id[1],
+            counter,
             sell_type + 10, // 11 = SELL_YES, 12 = SELL_NO (distinguish from bet events)
             shares,
             payout,

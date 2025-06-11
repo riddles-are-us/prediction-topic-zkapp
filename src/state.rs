@@ -3,6 +3,7 @@ use zkwasm_rest_abi::{StorageData, MERKLE_MAP};
 use std::cell::RefCell;
 use crate::market::MarketData;
 use crate::config::DEFAULT_MARKET;
+use crate::error::ERROR_MARKET_NOT_ACTIVE;
 
 #[derive(Serialize)]
 pub struct QueryState {
@@ -47,6 +48,15 @@ impl GlobalState {
         
         let player = PredictionMarketPlayer::get(&pid.try_into().unwrap()).unwrap();
         serde_json::to_string(&player).unwrap()
+    }
+
+    pub fn ensure_active(&self) -> Result <u64, u32> {
+        let current_time = self.counter;
+        if !self.market.is_active(current_time) {
+            return Err(ERROR_MARKET_NOT_ACTIVE);
+        } else {
+            Ok(current_time)
+        }
     }
 
     pub fn preempt() -> bool {
