@@ -4,15 +4,92 @@ import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
 
 export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
-// Command constants matching the Rust code
-export const TICK = 0;
-export const INSTALL_PLAYER = 1;
-export const WITHDRAW = 2;
-export const DEPOSIT = 3;
-export const BET = 4;
-export const SELL = 5;
-export const RESOLVE = 6;
-export const CLAIM = 7;
+// Command constants
+const TICK = 0;
+const INSTALL_PLAYER = 1;
+const WITHDRAW = 2;
+const DEPOSIT = 3;
+const BET = 4;
+const SELL = 5;
+const RESOLVE = 6;
+const CLAIM = 7;
+const WITHDRAW_FEES = 8;
+
+export class Player extends PlayerConvention {
+    constructor(key: string, rpc: ZKWasmAppRpc) {
+        super(key, rpc, BigInt(DEPOSIT), BigInt(WITHDRAW));
+        this.processingKey = key;
+        this.rpc = rpc;
+    }
+
+    async sendTransactionWithCommand(cmd: BigUint64Array) {
+        try {
+            let result = await this.rpc.sendTransaction(cmd, this.processingKey);
+            return result;
+        } catch (e) {
+            if (e instanceof Error) {
+                console.log(e.message);
+            }
+            throw e;
+        }
+    }
+
+    async installPlayer() {
+        try {
+            let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
+            return await this.sendTransactionWithCommand(cmd);
+        } catch (e) {
+            if (e instanceof Error && e.message === "PlayerAlreadyExists") {
+                console.log("Player already exists, skipping installation");
+                return null; // Not an error, just already exists
+            }
+            throw e; // Re-throw other errors
+        }
+    }
+
+    async placeBet(betType: number, amount: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async claimWinnings() {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(CLAIM), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async withdrawFunds(amount: bigint, addressHigh: bigint, addressLow: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW), [0n, amount, addressHigh, addressLow]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async depositFunds(amount: bigint, targetPid1: bigint, targetPid2: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, 0n, amount]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async resolveMarket(outcome: boolean) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async withdrawFees() {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW_FEES), []);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    async sellShares(sellType: number, shares: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+}
+
 
 export interface MarketData {
     title: string;
@@ -53,68 +130,6 @@ export interface StatsData {
     totalFeesCollected: string;
     yesLiquidity: string;
     noLiquidity: string;
-}
-
-// Player class for transaction handling
-export class Player extends PlayerConvention {
-    constructor(key: string, rpc: ZKWasmAppRpc) {
-        super(key, rpc, BigInt(DEPOSIT), BigInt(WITHDRAW));
-        this.processingKey = key;
-        this.rpc = rpc;
-    }
-
-    async sendTransactionWithCommand(cmd: BigUint64Array) {
-        try {
-            let result = await this.rpc.sendTransaction(cmd, this.processingKey);
-            return result;
-        } catch (e) {
-            if (e instanceof Error) {
-                console.log(e.message);
-            }
-            throw e;
-        }
-    }
-
-    async installPlayer() {
-        let cmd = createCommand(0n, BigInt(INSTALL_PLAYER), []);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async placeBet(betType: number, amount: bigint) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async sellShares(sellType: number, shares: bigint) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async claimWinnings() {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(CLAIM), []);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async withdrawFunds(amount: bigint, addressHigh: bigint, addressLow: bigint) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(WITHDRAW), [amount, addressHigh, addressLow]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async depositFunds(amount: bigint, targetPid1: bigint, targetPid2: bigint) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, 0n, amount]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async resolveMarket(outcome: boolean) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
 }
 
 export class PredictionMarketAPI {

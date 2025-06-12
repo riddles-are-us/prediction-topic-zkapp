@@ -1,9 +1,7 @@
 use crate::error::*;
-use crate::event::{insert_event, EVENT_MARKET_UPDATE, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE};
+use crate::event::{insert_event, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
-use crate::event::MarketEvent;
-use zkwasm_rest_abi::StorageData;
 
 #[derive(Clone)]
 pub enum Command {
@@ -117,6 +115,7 @@ impl Activity {
 
         // Check if market is active
         let current_time = GLOBAL_STATE.0.borrow_mut().ensure_active()?;
+        let txid = GLOBAL_STATE.0.borrow().txcounter;
 
         // Check player balance
         player.data.spend_balance(amount)?;
@@ -139,9 +138,7 @@ impl Activity {
 
         // Emit events
         // Self::emit_player_event(&player);
-        Self::emit_market_event();
-        Self::emit_bet_event(player.player_id, bet_type, amount, shares, current_time);
-
+        Self::emit_bet_event(player.player_id, bet_type, amount, shares, txid, current_time);
         Ok(())
     }
 
@@ -152,6 +149,7 @@ impl Activity {
 
         // Check if market is active
         let current_time = GLOBAL_STATE.0.borrow_mut().ensure_active()?;
+        let txid = GLOBAL_STATE.0.borrow().txcounter;
 
         // Check player has enough shares and sell
         let payout = if sell_type == 1 {
@@ -180,8 +178,7 @@ impl Activity {
 
         // Emit events
         // Self::emit_player_event(&player);
-        Self::emit_market_event();
-        Self::emit_sell_event(player.player_id, sell_type, shares, payout, current_time);
+        Self::emit_sell_event(player.player_id, sell_type, shares, payout, txid, current_time);
 
         Ok(())
     }
@@ -191,19 +188,12 @@ impl Activity {
         let current_time = global_state.counter;
 
         // TODO: Uncomment this when production is ready
-        // if !global_state.market.can_resolve(current_time) {
-        //     return Err(ERROR_MARKET_NOT_RESOLVED);
-        // }
+        if !global_state.market.can_resolve(current_time) && false {
+             return Err(ERROR_MARKET_NOT_RESOLVED);
+        }
 
         let outcome_bool = outcome != 0;
         global_state.market.resolve(outcome_bool)?;
-
-        // Release the borrow before emitting events
-        drop(global_state);
-
-        // Emit market update event
-        Self::emit_market_event();
-
         Ok(())
     }
 
@@ -233,9 +223,6 @@ impl Activity {
 
         drop(global_state);
 
-        // Emit player update event
-        // Self::emit_player_event(&player);
-
         Ok(())
     }
 
@@ -262,52 +249,31 @@ impl Activity {
 
         // Emit events
         // Self::emit_player_event(&player);
-        Self::emit_market_event();
-
         Ok(())
     }
 
-    fn emit_player_event(player: &Player) {
+    fn emit_bet_event(player_id: [u64; 2], bet_type: u64, amount: u64, shares: u64, txid: u64, counter: u64) {
         let mut data = vec![
-            player.player_id[0],
-            player.player_id[1],
-            player.data.balance,
-            player.data.yes_shares,
-            player.data.no_shares,
-            if player.data.claimed { 1 } else { 0 },
-        ];
-        insert_event(EVENT_PLAYER_UPDATE, &mut data);
-    }
-
-    fn emit_market_event() {
-        let global_state = GLOBAL_STATE.0.borrow();
-        let market_event = MarketEvent::from(&global_state.market);
-        let mut data = Vec::with_capacity(3);
-        data.push(global_state.counter);
-        market_event.to_data(&mut data);
-        insert_event(EVENT_MARKET_UPDATE, &mut data);
-    }
-
-    fn emit_bet_event(player_id: [u64; 2], bet_type: u64, amount: u64, shares: u64, counter: u64) {
-        let mut data = vec![
+            txid,
             player_id[0],
             player_id[1],
-            counter,
             bet_type,
             amount,
             shares,
+            counter,
         ];
         insert_event(EVENT_BET_UPDATE, &mut data);
     }
 
-    fn emit_sell_event(player_id: [u64; 2], sell_type: u64, shares: u64, payout: u64, counter: u64) {
+    fn emit_sell_event(player_id: [u64; 2], sell_type: u64, shares: u64, payout: u64, txid: u64, counter: u64) {
         let mut data = vec![
+            txid,
             player_id[0],
             player_id[1],
-            counter,
             sell_type + 10, // 11 = SELL_YES, 12 = SELL_NO (distinguish from bet events)
             shares,
             payout,
+            counter,
         ];
         insert_event(EVENT_BET_UPDATE, &mut data); // Reuse BET_UPDATE event for now
     }

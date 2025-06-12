@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use crate::market::MarketData;
 use crate::config::DEFAULT_MARKET;
 use crate::error::ERROR_MARKET_NOT_ACTIVE;
+use crate::event::{MarketEvent, EVENT_MARKET_UPDATE};
+use crate::event::insert_event;
 
 #[derive(Serialize)]
 pub struct QueryState {
@@ -17,6 +19,7 @@ pub struct GlobalState {
     pub market: MarketData,
     pub total_players: u64,
     pub txsize: u64,
+    pub txcounter: u64,
 }
 
 impl GlobalState {
@@ -35,8 +38,18 @@ impl GlobalState {
             market,
             total_players: 0,
             txsize: 0,
+            txcounter: 0,
         }
     }
+
+    fn emit_market_event(&self) {
+        let market_event = MarketEvent::from(&self.market);
+        let mut data = Vec::with_capacity(3);
+        data.push(self.counter);
+        market_event.to_data(&mut data);
+        insert_event(EVENT_MARKET_UPDATE, &mut data);
+    }
+
 
     pub fn snapshot() -> String {
         let state = GLOBAL_STATE.0.borrow();
@@ -45,7 +58,6 @@ impl GlobalState {
 
     pub fn get_state(pid: Vec<u64>) -> String {
         use crate::player::PredictionMarketPlayer;
-        
         let player = PredictionMarketPlayer::get(&pid.try_into().unwrap()).unwrap();
         serde_json::to_string(&player).unwrap()
     }
@@ -80,37 +92,20 @@ impl GlobalState {
         0
     }
 
-    pub fn store_into_kvpair(&self) {
-        let mut v = vec![];
-        v.push(self.counter);
-        v.push(self.total_players);
-        v.push(self.txsize);
-        self.market.to_data(&mut v);
+    pub fn store() {
+        let mut data = vec![];
+        GLOBAL_STATE.0.borrow_mut().to_data(&mut data);
         let kvpair = unsafe { &mut MERKLE_MAP };
-        kvpair.set(&[0, 0, 0, 0], v.as_slice());
+        kvpair.set(&[0, 0, 0, 0], data.as_slice());
     }
 
-    pub fn fetch(&mut self) {
+    pub fn initialize() {
         let kvpair = unsafe { &mut MERKLE_MAP };
         let mut data = kvpair.get(&[0, 0, 0, 0]);
         if !data.is_empty() {
             let mut u64data = data.iter_mut();
-            let counter = *u64data.next().unwrap();
-            let total_players = *u64data.next().unwrap();
-            let txsize = *u64data.next().unwrap();
-            self.counter = counter;
-            self.total_players = total_players;
-            self.txsize = txsize;
-            self.market = MarketData::from_data(&mut u64data);
+            *GLOBAL_STATE.0.borrow_mut() = Self::from_data(&mut u64data);
         }
-    }
-
-    pub fn store() {
-        GLOBAL_STATE.0.borrow_mut().store_into_kvpair();
-    }
-
-    pub fn initialize() {
-        GLOBAL_STATE.0.borrow_mut().fetch();
     }
 
     pub fn get_counter() -> u64 {
@@ -124,6 +119,7 @@ impl StorageData for GlobalState {
             counter: *u64data.next().unwrap(),
             total_players: *u64data.next().unwrap(),
             txsize: *u64data.next().unwrap(),
+            txcounter: *u64data.next().unwrap(),
             market: MarketData::from_data(u64data),
         }
     }
@@ -132,6 +128,7 @@ impl StorageData for GlobalState {
         data.push(self.counter);
         data.push(self.total_players);
         data.push(self.txsize);
+        data.push(self.txcounter);
         self.market.to_data(data);
     }
 }
@@ -223,10 +220,12 @@ impl Transaction {
 
     pub fn tick(&self) {
         GLOBAL_STATE.0.borrow_mut().counter += 1;
+        GLOBAL_STATE.0.borrow().emit_market_event();
     }
 
     pub fn inc_tx_number(&self) {
         GLOBAL_STATE.0.borrow_mut().txsize += 1;
+        GLOBAL_STATE.0.borrow_mut().txcounter += 1;
     }
 
     pub fn process(&self, pkey: &[u64; 4], rand: &[u64; 4]) -> Vec<u64> {
@@ -275,12 +274,10 @@ impl Transaction {
                 }
             }
         }
-        let txsize = {
+        let eventid = {
             let state = GLOBAL_STATE.0.borrow();
-            state.txsize
+            (state.counter << 32) + state.txcounter
         };
-        clear_events(vec![e as u64, txsize])
+        clear_events(vec![e as u64, eventid])
     }
 }
-
- 

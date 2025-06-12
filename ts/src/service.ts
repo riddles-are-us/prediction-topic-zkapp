@@ -1,7 +1,7 @@
 import { Express } from "express";
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { BetEvent, BetModel, Market, MarketModel, PlayerEvent, PlayerModel, docToJSON } from "./models.js";
+import { BetEvent, BetModel, MarketEvent, MarketModel, docToJSON } from "./models.js";
 import mongoose from 'mongoose';
 
 const service = new Service(eventCallback, batchedCallback, extra);
@@ -13,11 +13,17 @@ function extra(app: Express) {
   // Fetch the market data event start from [timestamp] with limit
   app.get("/data/market/:timestamp", async (req: any, res) => {
     try {
-      let limit = req.params.limit;
+      let limit = req.query.limit;
       if (!limit) {
           limit = 100;
       }
-      const doc = await MarketModel.find().limit(limit)
+      let forward = req.query.forward ? true : false;
+      let doc;
+      if (forward) {
+        doc = await MarketModel.find({ timestamp: { $gt: BigInt(req.params.timestamp) } }).limit(limit)
+      } else {
+        doc = await MarketModel.find({ timestamp: { $lt: BigInt(req.params.timestamp) } }).limit(limit)
+      }
       let data = doc.map((d) => {
         return docToJSON(d);
       });
@@ -68,15 +74,10 @@ function extra(app: Express) {
 
 service.serve();
 
-const EVENT_PLAYER_UPDATE = 1;
 const EVENT_MARKET_UPDATE = 2;
 const EVENT_BET_UPDATE = 3;
 
-async function bootstrap(merkleRoot: string): Promise<TxWitness[]> {
-    return [];
-}
-
-async function batchedCallback(arg: TxWitness[], preMerkle: string, postMerkle: string) {
+async function batchedCallback(_arg: TxWitness[], _preMerkle: string, postMerkle: string) {
     await txStateManager.moveToCommit(postMerkle);
 }
 
@@ -123,8 +124,9 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
             case EVENT_MARKET_UPDATE:
                 {
                     console.log("market update event");
-                    let market = Market.fromEvent(eventData);
-                    await MarketModel.findOneAndUpdate({}, market.toObject(), { upsert: true });
+                    let market = MarketEvent.fromEvent(eventData);
+                    let marketInfo = market.toObject();
+                    await MarketModel.findOneAndUpdate({counter: marketInfo.counter}, marketInfo, { upsert: true });
                     console.log("saved market update", market);
                 }
                 break;
@@ -137,21 +139,10 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
                     console.log("saved bet", bet);
                 }
                 break;
-            case EVENT_PLAYER_UPDATE:
-                {
-                    console.log("player update event");
-                    let player = PlayerEvent.fromEvent(eventData).toObject();
-                    await PlayerModel.findOneAndUpdate(
-                        { pid: player.pid},
-                        player,
-                        { upsert: true }
-                    );
-                    console.log("saved player update", player);
-                }
-                break;
             default:
                 console.log("unknown event");
-                break;
+                process.exit(1);
+                //break;
         }
         i += 1 + Number(eventLength);
     }
