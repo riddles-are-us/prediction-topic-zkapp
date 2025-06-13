@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::event::{insert_event, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE};
+use crate::event::{insert_event, EVENT_BET_UPDATE};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
 
@@ -120,18 +120,13 @@ impl Activity {
         // Check player balance
         player.data.spend_balance(amount)?;
 
-        // Place bet
-        let shares = if bet_type == 1 {
-            // YES bet
-            let shares = GLOBAL_STATE.0.borrow_mut().market.bet_yes(amount)?;
+        // Place bet using unified function
+        let shares = GLOBAL_STATE.0.borrow_mut().market.place_bet(bet_type, amount)?;
+        if bet_type == 1 {
             player.data.add_yes_shares(shares);
-            shares
         } else {
-            // NO bet
-            let shares = GLOBAL_STATE.0.borrow_mut().market.bet_no(amount)?;
             player.data.add_no_shares(shares);
-            shares
-        };
+        }
 
         // Store updated data
         player.store();
@@ -151,24 +146,23 @@ impl Activity {
         let current_time = GLOBAL_STATE.0.borrow_mut().ensure_active()?;
         let txid = GLOBAL_STATE.0.borrow().txcounter;
 
-        // Check player has enough shares and sell
-        let payout = if sell_type == 1 {
-            // Sell YES shares
-            if player.data.yes_shares < shares {
-                return Err(ERROR_INSUFFICIENT_BALANCE);
-            }
-            let payout = GLOBAL_STATE.0.borrow_mut().market.sell_yes(shares)?;
+        // Check player has enough shares
+        if sell_type == 1 && player.data.yes_shares < shares {
+            return Err(ERROR_INSUFFICIENT_BALANCE);
+        }
+        if sell_type != 1 && player.data.no_shares < shares {
+            return Err(ERROR_INSUFFICIENT_BALANCE);
+        }
+
+        // Sell shares using unified function
+        let payout = GLOBAL_STATE.0.borrow_mut().market.sell_shares(sell_type, shares)?;
+        
+        // Update player shares
+        if sell_type == 1 {
             player.data.yes_shares -= shares;
-            payout
         } else {
-            // Sell NO shares
-            if player.data.no_shares < shares {
-                return Err(ERROR_INSUFFICIENT_BALANCE);
-            }
-            let payout = GLOBAL_STATE.0.borrow_mut().market.sell_no(shares)?;
             player.data.no_shares -= shares;
-            payout
-        };
+        }
 
         // Add payout to player balance
         player.data.balance += payout;

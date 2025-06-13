@@ -76,19 +76,28 @@ impl MarketData {
         calculate_price_safe(self.yes_liquidity, total_liquidity)
     }
 
-    // 安全计算 YES 份额
-    pub fn calculate_yes_shares(&self, bet_amount: u64) -> Result<u64, u32> {
+    // 统一的份额计算函数（bet_type: 1=YES, 0=NO）
+    pub fn calculate_shares(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
         validate_bet_amount(bet_amount)?;
         
         let net_amount = calculate_net_amount_safe(bet_amount)?;
         
         // 安全的 AMM 计算
         let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        let new_no_liquidity = safe_add(self.no_liquidity, net_amount)?;
-        let new_yes_liquidity = calculate_new_liquidity_safe(k, new_no_liquidity)?;
+        let is_yes_bet = bet_type == 1;
         
-        if self.yes_liquidity >= new_yes_liquidity {
-            let shares = safe_sub(self.yes_liquidity, new_yes_liquidity)?;
+        let (new_yes_liquidity, new_no_liquidity, original_liquidity) = if is_yes_bet {
+            let new_no = safe_add(self.no_liquidity, net_amount)?;
+            let new_yes = calculate_new_liquidity_safe(k, new_no)?;
+            (new_yes, new_no, self.yes_liquidity)
+        } else {
+            let new_yes = safe_add(self.yes_liquidity, net_amount)?;
+            let new_no = calculate_new_liquidity_safe(k, new_yes)?;
+            (new_yes, new_no, self.no_liquidity)
+        };
+        
+        if original_liquidity >= if is_yes_bet { new_yes_liquidity } else { new_no_liquidity } {
+            let shares = safe_sub(original_liquidity, if is_yes_bet { new_yes_liquidity } else { new_no_liquidity })?;
             validate_shares(shares)?;
             Ok(shares)
         } else {
@@ -96,91 +105,69 @@ impl MarketData {
         }
     }
 
-    // 安全计算 NO 份额
-    pub fn calculate_no_shares(&self, bet_amount: u64) -> Result<u64, u32> {
-        validate_bet_amount(bet_amount)?;
-        
-        let net_amount = calculate_net_amount_safe(bet_amount)?;
-        
-        // 安全的 AMM 计算
-        let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        let new_yes_liquidity = safe_add(self.yes_liquidity, net_amount)?;
-        let new_no_liquidity = calculate_new_liquidity_safe(k, new_yes_liquidity)?;
-        
-        if self.no_liquidity >= new_no_liquidity {
-            let shares = safe_sub(self.no_liquidity, new_no_liquidity)?;
-            validate_shares(shares)?;
-            Ok(shares)
-        } else {
-            Ok(0)
-        }
-    }
 
-    // 安全计算 YES 卖出价值
-    pub fn calculate_yes_sell_value(&self, shares_to_sell: u64) -> Result<u64, u32> {
+
+    // 统一的卖出份额计算（返回净收益和费用）
+    pub fn calculate_sell_details(&self, sell_type: u64, shares_to_sell: u64) -> Result<(u64, u64), u32> {
         validate_shares(shares_to_sell)?;
         
-        if self.total_yes_shares == 0 {
-            return Ok(0);
+        let (total_shares, is_yes_sell) = if sell_type == 1 {
+            (self.total_yes_shares, true)
+        } else {
+            (self.total_no_shares, false)
+        };
+        
+        if total_shares == 0 {
+            return Ok((0, 0));
         }
         
         // 安全的 AMM 计算
         let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        let new_yes_liquidity = safe_add(self.yes_liquidity, shares_to_sell)?;
-        let new_no_liquidity = calculate_new_liquidity_safe(k, new_yes_liquidity)?;
-        
-        if self.no_liquidity >= new_no_liquidity {
-            let gross_amount = safe_sub(self.no_liquidity, new_no_liquidity)?;
-            let fee = calculate_fee_safe(gross_amount)?;
-            safe_sub(gross_amount, fee)
+        let (new_yes_liquidity, new_no_liquidity) = if is_yes_sell {
+            let new_yes = safe_add(self.yes_liquidity, shares_to_sell)?;
+            let new_no = calculate_new_liquidity_safe(k, new_yes)?;
+            (new_yes, new_no)
         } else {
-            Ok(0)
-        }
+            let new_no = safe_add(self.no_liquidity, shares_to_sell)?;
+            let new_yes = calculate_new_liquidity_safe(k, new_no)?;
+            (new_yes, new_no)
+        };
+        
+        let gross_amount = if is_yes_sell {
+            if self.no_liquidity >= new_no_liquidity {
+                safe_sub(self.no_liquidity, new_no_liquidity)?
+            } else {
+                return Ok((0, 0));
+            }
+        } else {
+            if self.yes_liquidity >= new_yes_liquidity {
+                safe_sub(self.yes_liquidity, new_yes_liquidity)?
+            } else {
+                return Ok((0, 0));
+            }
+        };
+        
+        let fee = calculate_fee_safe(gross_amount)?;
+        let net_payout = safe_sub(gross_amount, fee)?;
+        
+        Ok((net_payout, fee))
     }
 
-    // 安全计算 NO 卖出价值
-    pub fn calculate_no_sell_value(&self, shares_to_sell: u64) -> Result<u64, u32> {
-        validate_shares(shares_to_sell)?;
-        
-        if self.total_no_shares == 0 {
-            return Ok(0);
-        }
-        
-        // 安全的 AMM 计算
-        let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        let new_no_liquidity = safe_add(self.no_liquidity, shares_to_sell)?;
-        let new_yes_liquidity = calculate_new_liquidity_safe(k, new_no_liquidity)?;
-        
-        if self.yes_liquidity >= new_yes_liquidity {
-            let gross_amount = safe_sub(self.yes_liquidity, new_yes_liquidity)?;
-            let fee = calculate_fee_safe(gross_amount)?;
-            safe_sub(gross_amount, fee)
-        } else {
-            Ok(0)
-        }
-    }
 
-    // 安全的买入价格计算
-    pub fn get_buy_yes_price(&self, bet_amount: u64) -> Result<u64, u32> {
-        let shares = self.calculate_yes_shares(bet_amount)?;
+
+    // 统一的买入价格计算（bet_type: 1=YES, 0=NO）
+    pub fn get_buy_price(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
+        let shares = self.calculate_shares(bet_type, bet_amount)?;
         calculate_effective_price_safe(bet_amount, shares)
     }
 
-    pub fn get_buy_no_price(&self, bet_amount: u64) -> Result<u64, u32> {
-        let shares = self.calculate_no_shares(bet_amount)?;
-        calculate_effective_price_safe(bet_amount, shares)
-    }
-
-    // 安全的卖出价格计算
-    pub fn get_sell_yes_price(&self, shares_to_sell: u64) -> Result<u64, u32> {
-        let payout = self.calculate_yes_sell_value(shares_to_sell)?;
+    // 统一的卖出价格计算（sell_type: 1=YES, 0=NO）
+    pub fn get_sell_price(&self, sell_type: u64, shares_to_sell: u64) -> Result<u64, u32> {
+        let (payout, _) = self.calculate_sell_details(sell_type, shares_to_sell)?;
         calculate_effective_price_safe(payout, shares_to_sell)
     }
 
-    pub fn get_sell_no_price(&self, shares_to_sell: u64) -> Result<u64, u32> {
-        let payout = self.calculate_no_sell_value(shares_to_sell)?;
-        calculate_effective_price_safe(payout, shares_to_sell)
-    }
+
 
     // 市场影响分析（安全版本）
     pub fn get_buy_market_impact(&self, bet_type: u64, bet_amount: u64) -> Result<(u64, u64), u32> {
@@ -193,11 +180,7 @@ impl MarketData {
         
         // 模拟交易
         let mut temp_market = self.clone();
-        if bet_type == 1 {
-            let _ = temp_market.bet_yes(bet_amount)?;
-        } else {
-            let _ = temp_market.bet_no(bet_amount)?;
-        }
+        let _ = temp_market.place_bet(bet_type, bet_amount)?;
         
         let new_yes_price = temp_market.get_yes_price()?;
         let new_no_price = temp_market.get_no_price()?;
@@ -217,11 +200,7 @@ impl MarketData {
             self.get_no_price()?
         };
         
-        let effective_price = if bet_type == 1 {
-            self.get_buy_yes_price(bet_amount)?
-        } else {
-            self.get_buy_no_price(bet_amount)?
-        };
+        let effective_price = self.get_buy_price(bet_type, bet_amount)?;
         
         if effective_price > current_price {
             safe_sub(effective_price, current_price)
@@ -230,67 +209,57 @@ impl MarketData {
         }
     }
 
-    // 安全执行 YES 投注
-    pub fn bet_yes(&mut self, bet_amount: u64) -> Result<u64, u32> {
+    // 统一的投注函数（bet_type: 1=YES, 0=NO）
+    pub fn place_bet(&mut self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
         validate_bet_amount(bet_amount)?;
 
-        let shares = self.calculate_yes_shares(bet_amount)?;
+        let shares = self.calculate_shares(bet_type, bet_amount)?;
         if shares == 0 {
             return Err(ERROR_INVALID_BET_AMOUNT);
         }
 
         let fee = calculate_fee_safe(bet_amount)?;
         let net_amount = safe_sub(bet_amount, fee)?;
+        let is_yes_bet = bet_type == 1;
         
         // 安全更新 AMM 流动性
         let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        self.no_liquidity = safe_add(self.no_liquidity, net_amount)?;
-        self.yes_liquidity = calculate_new_liquidity_safe(k, self.no_liquidity)?;
-        
-        // 安全更新状态
-        self.prize_pool = safe_add(self.prize_pool, net_amount)?;
-        self.total_volume = safe_add(self.total_volume, bet_amount)?;
-        self.total_yes_shares = safe_add(self.total_yes_shares, shares)?;
-        self.total_fees_collected = safe_add(self.total_fees_collected, fee)?;
-        
-        Ok(shares)
-    }
-
-    // 安全执行 NO 投注
-    pub fn bet_no(&mut self, bet_amount: u64) -> Result<u64, u32> {
-        validate_bet_amount(bet_amount)?;
-
-        let shares = self.calculate_no_shares(bet_amount)?;
-        if shares == 0 {
-            return Err(ERROR_INVALID_BET_AMOUNT);
+        if is_yes_bet {
+            self.no_liquidity = safe_add(self.no_liquidity, net_amount)?;
+            self.yes_liquidity = calculate_new_liquidity_safe(k, self.no_liquidity)?;
+            self.total_yes_shares = safe_add(self.total_yes_shares, shares)?;
+        } else {
+            self.yes_liquidity = safe_add(self.yes_liquidity, net_amount)?;
+            self.no_liquidity = calculate_new_liquidity_safe(k, self.yes_liquidity)?;
+            self.total_no_shares = safe_add(self.total_no_shares, shares)?;
         }
-
-        let fee = calculate_fee_safe(bet_amount)?;
-        let net_amount = safe_sub(bet_amount, fee)?;
-        
-        // 安全更新 AMM 流动性
-        let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        self.yes_liquidity = safe_add(self.yes_liquidity, net_amount)?;
-        self.no_liquidity = calculate_new_liquidity_safe(k, self.yes_liquidity)?;
         
         // 安全更新状态
         self.prize_pool = safe_add(self.prize_pool, net_amount)?;
         self.total_volume = safe_add(self.total_volume, bet_amount)?;
-        self.total_no_shares = safe_add(self.total_no_shares, shares)?;
         self.total_fees_collected = safe_add(self.total_fees_collected, fee)?;
         
         Ok(shares)
     }
 
-    // 安全执行 YES 卖出
-    pub fn sell_yes(&mut self, shares_to_sell: u64) -> Result<u64, u32> {
+
+
+    // 统一的卖出函数（sell_type: 1=YES, 0=NO）
+    pub fn sell_shares(&mut self, sell_type: u64, shares_to_sell: u64) -> Result<u64, u32> {
         validate_shares(shares_to_sell)?;
 
-        if shares_to_sell > self.total_yes_shares {
+        let (total_shares, is_yes_sell) = if sell_type == 1 {
+            (self.total_yes_shares, true)
+        } else {
+            (self.total_no_shares, false)
+        };
+
+        if shares_to_sell > total_shares {
             return Err(ERROR_INSUFFICIENT_BALANCE);
         }
 
-        let payout = self.calculate_yes_sell_value(shares_to_sell)?;
+        // 使用优化的计算函数，一次性计算净收益和费用
+        let (payout, fee) = self.calculate_sell_details(sell_type, shares_to_sell)?;
         if payout == 0 {
             return Err(ERROR_INVALID_BET_AMOUNT);
         }
@@ -301,54 +270,27 @@ impl MarketData {
 
         // 安全更新 AMM 流动性
         let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        self.yes_liquidity = safe_add(self.yes_liquidity, shares_to_sell)?;
-        self.no_liquidity = calculate_new_liquidity_safe(k, self.yes_liquidity)?;
+        if is_yes_sell {
+            self.yes_liquidity = safe_add(self.yes_liquidity, shares_to_sell)?;
+            self.no_liquidity = calculate_new_liquidity_safe(k, self.yes_liquidity)?;
+            self.total_yes_shares = safe_sub(self.total_yes_shares, shares_to_sell)?;
+        } else {
+            self.no_liquidity = safe_add(self.no_liquidity, shares_to_sell)?;
+            self.yes_liquidity = calculate_new_liquidity_safe(k, self.no_liquidity)?;
+            self.total_no_shares = safe_sub(self.total_no_shares, shares_to_sell)?;
+        }
 
         // 安全更新状态
         self.prize_pool = safe_sub(self.prize_pool, payout)?;
-        self.total_yes_shares = safe_sub(self.total_yes_shares, shares_to_sell)?;
-        
-        // 计算并收取费用
-        let gross_amount = safe_sub(self.no_liquidity, calculate_new_liquidity_safe(k, self.yes_liquidity)?)?;
-        let fee = calculate_fee_safe(gross_amount)?;
         self.total_fees_collected = safe_add(self.total_fees_collected, fee)?;
+        // 将卖出金额（payout + fee）计入总交易量
+        let total_transaction_value = safe_add(payout, fee)?;
+        self.total_volume = safe_add(self.total_volume, total_transaction_value)?;
 
         Ok(payout)
     }
 
-    // 安全执行 NO 卖出
-    pub fn sell_no(&mut self, shares_to_sell: u64) -> Result<u64, u32> {
-        validate_shares(shares_to_sell)?;
 
-        if shares_to_sell > self.total_no_shares {
-            return Err(ERROR_INSUFFICIENT_BALANCE);
-        }
-
-        let payout = self.calculate_no_sell_value(shares_to_sell)?;
-        if payout == 0 {
-            return Err(ERROR_INVALID_BET_AMOUNT);
-        }
-
-        if payout > self.prize_pool {
-            return Err(ERROR_INSUFFICIENT_BALANCE);
-        }
-
-        // 安全更新 AMM 流动性
-        let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        self.no_liquidity = safe_add(self.no_liquidity, shares_to_sell)?;
-        self.yes_liquidity = calculate_new_liquidity_safe(k, self.no_liquidity)?;
-
-        // 安全更新状态
-        self.prize_pool = safe_sub(self.prize_pool, payout)?;
-        self.total_no_shares = safe_sub(self.total_no_shares, shares_to_sell)?;
-        
-        // 计算并收取费用
-        let gross_amount = safe_sub(self.yes_liquidity, calculate_new_liquidity_safe(k, self.no_liquidity)?)?;
-        let fee = calculate_fee_safe(gross_amount)?;
-        self.total_fees_collected = safe_add(self.total_fees_collected, fee)?;
-
-        Ok(payout)
-    }
 
     // 市场解决
     pub fn resolve(&mut self, outcome: bool) -> Result<(), u32> {

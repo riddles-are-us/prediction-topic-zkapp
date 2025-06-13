@@ -15,6 +15,10 @@ const RESOLVE = 6;
 const CLAIM = 7;
 const WITHDRAW_FEES = 8;
 
+// Fee constants - centralized to avoid duplication
+const PLATFORM_FEE_RATE = 100n; // 1%
+const FEE_BASIS_POINTS = 10000n;
+
 export class Player extends PlayerConvention {
     constructor(key: string, rpc: ZKWasmAppRpc) {
         super(key, rpc, BigInt(DEPOSIT), BigInt(WITHDRAW));
@@ -88,6 +92,8 @@ export class Player extends PlayerConvention {
         let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
         return await this.sendTransactionWithCommand(cmd);
     }
+
+
 }
 
 
@@ -191,17 +197,16 @@ export class PredictionMarketAPI {
         return result.data;
     }
 
-    // Calculate expected shares for a bet amount
-    calculateExpectedShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
+    // Unified shares calculation function (betType: 1=YES, 0=NO)
+    calculateShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
         if (amount <= 0) return 0n;
 
-        const PLATFORM_FEE_RATE = 100n; // 1%
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / 10000n;
+        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
         const netAmount = BigInt(amount) - fee;
-
         const k = yesLiquidity * noLiquidity;
+        const isYesBet = betType === 1;
 
-        if (betType === 1) { // YES bet
+        if (isYesBet) { // YES bet
             const newNoLiquidity = noLiquidity + netAmount;
             const newYesLiquidity = k / newNoLiquidity;
             return yesLiquidity > newYesLiquidity ? yesLiquidity - newYesLiquidity : 0n;
@@ -212,38 +217,52 @@ export class PredictionMarketAPI {
         }
     }
 
-    // Calculate expected payout for selling shares
-    calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
-        if (shares <= 0) return 0n;
 
-        const PLATFORM_FEE_RATE = 100n; // 1%
+
+    // Calculate sell details (net payout and fee) - unified function
+    calculateSellDetails(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): { netPayout: bigint, fee: bigint } {
+        if (shares <= 0) return { netPayout: 0n, fee: 0n };
+
         const k = yesLiquidity * noLiquidity;
+        const isYesSell = sellType === 1;
 
-        if (sellType === 1) { // Sell YES shares
+        let grossAmount = 0n;
+
+        if (isYesSell) { // Sell YES shares
             const newYesLiquidity = yesLiquidity + BigInt(shares);
             const newNoLiquidity = k / newYesLiquidity;
             if (noLiquidity > newNoLiquidity) {
-                const grossAmount = noLiquidity - newNoLiquidity;
-                const fee = (grossAmount * PLATFORM_FEE_RATE) / 10000n;
-                return grossAmount - fee;
+                grossAmount = noLiquidity - newNoLiquidity;
             }
         } else { // Sell NO shares
             const newNoLiquidity = noLiquidity + BigInt(shares);
             const newYesLiquidity = k / newNoLiquidity;
             if (yesLiquidity > newYesLiquidity) {
-                const grossAmount = yesLiquidity - newYesLiquidity;
-                const fee = (grossAmount * PLATFORM_FEE_RATE) / 10000n;
-                return grossAmount - fee;
+                grossAmount = yesLiquidity - newYesLiquidity;
             }
         }
-        return 0n;
+
+        if (grossAmount === 0n) {
+            return { netPayout: 0n, fee: 0n };
+        }
+
+        const fee = (grossAmount * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
+        const netPayout = grossAmount - fee;
+        
+        return { netPayout, fee };
+    }
+
+    // Calculate expected payout for selling shares (backward compatible)
+    calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
+        const { netPayout } = this.calculateSellDetails(sellType, shares, yesLiquidity, noLiquidity);
+        return netPayout;
     }
 
     // Get effective buy price per share
     getBuyPrice(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
         if (amount <= 0) return 0;
 
-        const shares = this.calculateExpectedShares(betType, amount, yesLiquidity, noLiquidity);
+        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
         if (shares === 0n) return 0;
 
         // Return price per share (1.0 = 1 token per share)
@@ -279,9 +298,9 @@ export class PredictionMarketAPI {
             };
         }
 
-        // Simulate the trade
-        const PLATFORM_FEE_RATE = 100n; // 1%
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / 10000n;
+        // Simulate the trade using unified calculation
+        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
+        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
         const netAmount = BigInt(amount) - fee;
 
         const k = yesLiquidity * noLiquidity;
@@ -419,7 +438,7 @@ export async function exampleUsage() {
             console.log(`YES bet slippage: ${yesSlippage.toFixed(3)}`);
 
             // Calculate expected shares and sell prices
-            const expectedYesShares = api.calculateExpectedShares(1, 1000, yesLiquidity, noLiquidity);
+            const expectedYesShares = api.calculateShares(1, 1000, yesLiquidity, noLiquidity);
             const yesSellPrice = api.getSellPrice(1, Number(expectedYesShares), yesLiquidity, noLiquidity);
             console.log(`Expected YES shares: ${expectedYesShares}, sell price: ${yesSellPrice.toFixed(3)}`);
 

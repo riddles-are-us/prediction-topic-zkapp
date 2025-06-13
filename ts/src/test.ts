@@ -143,7 +143,7 @@ function testAMMCalculations() {
     const betAmount = 10000;
     
     // Calculate YES bet
-    const yesShares = api.calculateExpectedShares(1, betAmount, initialYesLiquidity, initialNoLiquidity);
+    const yesShares = api.calculateShares(1, betAmount, initialYesLiquidity, initialNoLiquidity);
     console.log(`\nBetting ${betAmount} on YES:`);
     console.log(`Expected shares: ${yesShares}`);
     

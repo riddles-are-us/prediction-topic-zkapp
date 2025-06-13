@@ -126,9 +126,9 @@ mod security_tests {
         let result = calculate_fee_safe(10000);
         assert!(result.is_ok());
         
-        // 验证费用计算正确性 (0.25% = 25/10000)
+        // 验证费用计算正确性 (1% = 100/10000)
         let fee = result.unwrap();
-        assert_eq!(fee, 25); // 10000 * 25 / 10000 = 25
+        assert_eq!(fee, 100); // 10000 * 100 / 10000 = 100
         
         // 测试过大金额
         let result = calculate_fee_safe(MAX_BET_AMOUNT + 1);
@@ -142,7 +142,7 @@ mod security_tests {
         assert!(result.is_ok());
         
         let net = result.unwrap();
-        assert_eq!(net, 9975); // 10000 - 25 = 9975
+        assert_eq!(net, 9900); // 10000 - 100 = 9900
         
         // 测试过大金额
         let result = calculate_net_amount_safe(MAX_BET_AMOUNT + 1);
@@ -271,15 +271,15 @@ mod market_safe_tests {
         ).unwrap();
         
         // 测试过大投注
-        let result = market.bet_yes(MAX_BET_AMOUNT + 1);
+        let result = market.place_bet(1, MAX_BET_AMOUNT + 1);
         assert_eq!(result, Err(ERROR_BET_TOO_LARGE));
         
         // 测试零投注
-        let result = market.bet_yes(0);
+        let result = market.place_bet(1, 0);
         assert_eq!(result, Err(ERROR_INVALID_BET_AMOUNT));
         
         // 测试正常投注
-        let result = market.bet_yes(1000);
+        let result = market.place_bet(1, 1000);
         assert!(result.is_ok());
     }
 
@@ -316,12 +316,12 @@ mod market_safe_tests {
         ).unwrap();
         
         // 测试正常份额计算
-        let shares = market.calculate_yes_shares(10000);
+        let shares = market.calculate_shares(1, 10000);
         assert!(shares.is_ok());
         assert!(shares.unwrap() > 0);
         
         // 测试过大投注
-        let shares = market.calculate_yes_shares(MAX_BET_AMOUNT + 1);
+        let shares = market.calculate_shares(1, MAX_BET_AMOUNT + 1);
         assert_eq!(shares, Err(ERROR_BET_TOO_LARGE));
     }
 
@@ -336,18 +336,18 @@ mod market_safe_tests {
         ).unwrap();
         
         // 先投注获得份额
-        let shares = market.bet_yes(10000).unwrap();
+        let shares = market.place_bet(1, 10000).unwrap();
         
         // 测试正常卖出
-        let payout = market.sell_yes(shares / 2);
+        let payout = market.sell_shares(1, shares / 2);
         assert!(payout.is_ok());
         
         // 测试卖出过多份额
-        let payout = market.sell_yes(shares * 2);
+        let payout = market.sell_shares(1, shares * 2);
         assert_eq!(payout, Err(ERROR_INSUFFICIENT_BALANCE));
         
         // 测试过大份额数
-        let payout = market.sell_yes(MAX_SHARES + 1);
+        let payout = market.sell_shares(1, MAX_SHARES + 1);
         assert_eq!(payout, Err(ERROR_BET_TOO_LARGE));
     }
 
@@ -362,8 +362,8 @@ mod market_safe_tests {
         ).unwrap();
         
         // 投注并解决市场
-        let yes_shares = market.bet_yes(10000).unwrap();
-        let no_shares = market.bet_no(5000).unwrap();
+        let yes_shares = market.place_bet(1, 10000).unwrap();
+        let no_shares = market.place_bet(0, 5000).unwrap();
         
         market.resolve(true).unwrap(); // YES 获胜
         
