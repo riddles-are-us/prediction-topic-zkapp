@@ -22,10 +22,17 @@ function extra(app: Express) {
       // console.log("limit is", req.params.timestamp);
       let doc;
       if (forward) {
-        doc = await MarketModel.find({ counter: { $gt: BigInt(req.params.timestamp) } }).limit(limit)
-      } else {
-        doc = await MarketModel.find({ counter: { $lt: BigInt(req.params.timestamp) } }).limit(limit)
-      }
+        // 向前查询：获取大于timestamp的数据，按counter升序排列
+        doc = await MarketModel.find({ counter: { $gt: BigInt(req.params.timestamp) } })
+            .sort({ counter: 1 })
+            .limit(limit);
+    }
+    else {
+        // 向后查询：获取小于等于timestamp的数据，按counter降序排列（最近的优先）
+        doc = await MarketModel.find({ counter: { $lte: BigInt(req.params.timestamp) } })
+            .sort({ counter: -1 })
+            .limit(limit);
+    }
       //doc = await MarketModel.find();
       let data = doc.map((d) => {
         return docToJSON(d);
