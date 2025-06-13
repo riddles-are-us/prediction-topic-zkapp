@@ -18,12 +18,15 @@ function extra(app: Express) {
           limit = 100;
       }
       let forward = req.query.forward ? true : false;
+      console.log("timestamp is", req.params.timestamp);
+      console.log("limit is", req.params.timestamp);
       let doc;
       if (forward) {
-        doc = await MarketModel.find({ timestamp: { $gt: BigInt(req.params.timestamp) } }).limit(limit)
+        doc = await MarketModel.find({ counter: { $gt: BigInt(req.params.timestamp) } }).limit(limit)
       } else {
-        doc = await MarketModel.find({ timestamp: { $lt: BigInt(req.params.timestamp) } }).limit(limit)
+        doc = await MarketModel.find({ counter: { $lt: BigInt(req.params.timestamp) } }).limit(limit)
       }
+      //doc = await MarketModel.find();
       let data = doc.map((d) => {
         return docToJSON(d);
       });
