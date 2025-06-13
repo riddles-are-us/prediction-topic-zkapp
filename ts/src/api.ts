@@ -201,7 +201,8 @@ export class PredictionMarketAPI {
     calculateShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
         if (amount <= 0) return 0n;
 
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
+        // 向上取整计算费用：(amount * rate + basis - 1) / basis
+        const fee = (BigInt(amount) * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netAmount = BigInt(amount) - fee;
         const k = yesLiquidity * noLiquidity;
         const isYesBet = betType === 1;
@@ -246,7 +247,8 @@ export class PredictionMarketAPI {
             return { netPayout: 0n, fee: 0n };
         }
 
-        const fee = (grossAmount * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
+        // 向上取整计算费用：(amount * rate + basis - 1) / basis
+        const fee = (grossAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netPayout = grossAmount - fee;
         
         return { netPayout, fee };
@@ -300,7 +302,8 @@ export class PredictionMarketAPI {
 
         // Simulate the trade using unified calculation
         const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE) / FEE_BASIS_POINTS;
+        // 向上取整计算费用：(amount * rate + basis - 1) / basis
+        const fee = (BigInt(amount) * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netAmount = BigInt(amount) - fee;
 
         const k = yesLiquidity * noLiquidity;

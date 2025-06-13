@@ -100,13 +100,29 @@ pub fn calculate_new_liquidity_safe(k: u128, other_liquidity: u64) -> Result<u64
     Ok(result)
 }
 
-/// 安全计算平台费用
+/// 安全计算平台费用（向上取整确保不丢失费用）
 pub fn calculate_fee_safe(amount: u64) -> Result<u64, u32> {
     if amount > MAX_BET_AMOUNT {
         return Err(ERROR_BET_TOO_LARGE);
     }
     
-    safe_div_high_precision(amount, PLATFORM_FEE_RATE, FEE_BASIS_POINTS)
+    // 计算 (amount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1) / FEE_BASIS_POINTS
+    // 这样可以实现向上取整
+    let numerator = (amount as u128)
+        .checked_mul(PLATFORM_FEE_RATE as u128)
+        .ok_or(ERROR_OVERFLOW)?;
+    
+    let rounded_numerator = numerator
+        .checked_add((FEE_BASIS_POINTS - 1) as u128)
+        .ok_or(ERROR_OVERFLOW)?;
+    
+    let result = rounded_numerator / FEE_BASIS_POINTS as u128;
+    
+    if result > u64::MAX as u128 {
+        return Err(ERROR_OVERFLOW);
+    }
+    
+    Ok(result as u64)
 }
 
 /// 安全计算净金额（扣除费用后）

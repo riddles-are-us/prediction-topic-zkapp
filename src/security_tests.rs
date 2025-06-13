@@ -126,9 +126,42 @@ mod security_tests {
         let result = calculate_fee_safe(10000);
         assert!(result.is_ok());
         
-        // 验证费用计算正确性 (1% = 100/10000)
+        // 验证费用计算正确性 (1% = 100/10000，向上取整)
         let fee = result.unwrap();
-        assert_eq!(fee, 100); // 10000 * 100 / 10000 = 100
+        assert_eq!(fee, 100); // 10000 * 100 / 10000 = 100（恰好整除）
+        
+        // 测试向上取整的费用计算
+        // 1960 * 100 / 10000 = 19.6，应该向上取整为 20
+        let result = calculate_fee_safe(1960);
+        assert!(result.is_ok());
+        let fee = result.unwrap();
+        assert_eq!(fee, 20); // 向上取整
+        
+        // 测试另一个向上取整的例子
+        // 99 * 100 / 10000 = 0.99，应该向上取整为 1
+        let result = calculate_fee_safe(99);
+        assert!(result.is_ok());
+        let fee = result.unwrap();
+        assert_eq!(fee, 1); // 向上取整，确保最小费用
+        
+        // 测试100以内的小额费用
+        // 50 * 100 / 10000 = 0.5，应该向上取整为 1
+        let result = calculate_fee_safe(50);
+        assert!(result.is_ok());
+        let fee = result.unwrap();
+        assert_eq!(fee, 1); // 向上取整
+        
+        // 10 * 100 / 10000 = 0.1，应该向上取整为 1
+        let result = calculate_fee_safe(10);
+        assert!(result.is_ok());
+        let fee = result.unwrap();
+        assert_eq!(fee, 1); // 向上取整
+        
+        // 1 * 100 / 10000 = 0.01，应该向上取整为 1
+        let result = calculate_fee_safe(1);
+        assert!(result.is_ok());
+        let fee = result.unwrap();
+        assert_eq!(fee, 1); // 向上取整，确保最小费用为1
         
         // 测试过大金额
         let result = calculate_fee_safe(MAX_BET_AMOUNT + 1);
@@ -143,6 +176,12 @@ mod security_tests {
         
         let net = result.unwrap();
         assert_eq!(net, 9900); // 10000 - 100 = 9900
+        
+        // 测试向上取整对净金额的影响
+        let result = calculate_net_amount_safe(1960);
+        assert!(result.is_ok());
+        let net = result.unwrap();
+        assert_eq!(net, 1940); // 1960 - 20 = 1940
         
         // 测试过大金额
         let result = calculate_net_amount_safe(MAX_BET_AMOUNT + 1);
