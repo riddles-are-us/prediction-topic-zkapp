@@ -155,59 +155,59 @@ impl MarketData {
 
 
 
-    // 统一的买入价格计算（bet_type: 1=YES, 0=NO）
-    pub fn get_buy_price(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
-        let shares = self.calculate_shares(bet_type, bet_amount)?;
-        calculate_effective_price_safe(bet_amount, shares)
-    }
+    // // 统一的买入价格计算（bet_type: 1=YES, 0=NO）- 前端分析用，后端不使用
+    // pub fn get_buy_price(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
+    //     let shares = self.calculate_shares(bet_type, bet_amount)?;
+    //     calculate_effective_price_safe(bet_amount, shares)
+    // }
 
-    // 统一的卖出价格计算（sell_type: 1=YES, 0=NO）
-    pub fn get_sell_price(&self, sell_type: u64, shares_to_sell: u64) -> Result<u64, u32> {
-        let (payout, _) = self.calculate_sell_details(sell_type, shares_to_sell)?;
-        calculate_effective_price_safe(payout, shares_to_sell)
-    }
+    // // 统一的卖出价格计算（sell_type: 1=YES, 0=NO）- 前端分析用，后端不使用
+    // pub fn get_sell_price(&self, sell_type: u64, shares_to_sell: u64) -> Result<u64, u32> {
+    //     let (payout, _) = self.calculate_sell_details(sell_type, shares_to_sell)?;
+    //     calculate_effective_price_safe(payout, shares_to_sell)
+    // }
 
 
 
-    // 市场影响分析（安全版本）
-    pub fn get_buy_market_impact(&self, bet_type: u64, bet_amount: u64) -> Result<(u64, u64), u32> {
-        let current_yes_price = self.get_yes_price()?;
-        let current_no_price = self.get_no_price()?;
-        
-        if bet_amount == 0 {
-            return Ok((current_yes_price, current_no_price));
-        }
-        
-        // 模拟交易
-        let mut temp_market = self.clone();
-        let _ = temp_market.place_bet(bet_type, bet_amount)?;
-        
-        let new_yes_price = temp_market.get_yes_price()?;
-        let new_no_price = temp_market.get_no_price()?;
-        
-        Ok((new_yes_price, new_no_price))
-    }
+    // // 市场影响分析（安全版本）- 前端分析用，后端不使用
+    // pub fn get_buy_market_impact(&self, bet_type: u64, bet_amount: u64) -> Result<(u64, u64), u32> {
+    //     let current_yes_price = self.get_yes_price()?;
+    //     let current_no_price = self.get_no_price()?;
+    //     
+    //     if bet_amount == 0 {
+    //         return Ok((current_yes_price, current_no_price));
+    //     }
+    //     
+    //     // 模拟交易
+    //     let mut temp_market = self.clone();
+    //     let _ = temp_market.place_bet(bet_type, bet_amount)?;
+    //     
+    //     let new_yes_price = temp_market.get_yes_price()?;
+    //     let new_no_price = temp_market.get_no_price()?;
+    //     
+    //     Ok((new_yes_price, new_no_price))
+    // }
 
-    // 滑点计算（安全版本）
-    pub fn get_slippage(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
-        if bet_amount == 0 {
-            return Ok(0);
-        }
-        
-        let current_price = if bet_type == 1 {
-            self.get_yes_price()?
-        } else {
-            self.get_no_price()?
-        };
-        
-        let effective_price = self.get_buy_price(bet_type, bet_amount)?;
-        
-        if effective_price > current_price {
-            safe_sub(effective_price, current_price)
-        } else {
-            Ok(0)
-        }
-    }
+    // // 滑点计算（安全版本）- 前端分析用，后端不使用
+    // pub fn get_slippage(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
+    //     if bet_amount == 0 {
+    //         return Ok(0);
+    //     }
+    //     
+    //     let current_price = if bet_type == 1 {
+    //         self.get_yes_price()?
+    //     } else {
+    //         self.get_no_price()?
+    //     };
+    //     
+    //     let effective_price = self.get_buy_price(bet_type, bet_amount)?;
+    //     
+    //     if effective_price > current_price {
+    //         safe_sub(effective_price, current_price)
+    //     } else {
+    //         Ok(0)
+    //     }
+    // }
 
     // 统一的投注函数（bet_type: 1=YES, 0=NO）
     pub fn place_bet(&mut self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
@@ -328,22 +328,22 @@ impl MarketData {
         }
     }
 
-    // 获取份额价值（解决前估算）
-    pub fn get_share_value(&self, is_yes_share: bool) -> Result<u64, u32> {
-        if self.prize_pool == 0 {
-            return Ok(0);
-        }
-        
-        if is_yes_share {
-            if self.total_yes_shares == 0 { return Ok(0); }
-            let total_shares = safe_add(self.total_yes_shares, self.total_no_shares)?;
-            safe_div(self.prize_pool, total_shares)
-        } else {
-            if self.total_no_shares == 0 { return Ok(0); }
-            let total_shares = safe_add(self.total_yes_shares, self.total_no_shares)?;
-            safe_div(self.prize_pool, total_shares)
-        }
-    }
+    // // 获取份额价值（解决前估算）- 前端分析用，后端不使用
+    // pub fn get_share_value(&self, is_yes_share: bool) -> Result<u64, u32> {
+    //     if self.prize_pool == 0 {
+    //         return Ok(0);
+    //     }
+    //     
+    //     if is_yes_share {
+    //         if self.total_yes_shares == 0 { return Ok(0); }
+    //         let total_shares = safe_add(self.total_yes_shares, self.total_no_shares)?;
+    //         safe_div(self.prize_pool, total_shares)
+    //     } else {
+    //         if self.total_no_shares == 0 { return Ok(0); }
+    //         let total_shares = safe_add(self.total_yes_shares, self.total_no_shares)?;
+    //         safe_div(self.prize_pool, total_shares)
+    //     }
+    // }
 }
 
 impl StorageData for MarketData {
