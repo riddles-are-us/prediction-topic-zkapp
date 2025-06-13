@@ -205,13 +205,16 @@ impl Transaction {
     pub fn create_player(&self, pkey: &[u64; 4]) -> Result<(), u32> {
         use crate::player::Player;
         use crate::error::{ERROR_PLAYER_ALREADY_EXISTS};
+        use crate::config::NEW_PLAYER_INITIAL_BALANCE;
         
         let player_id = Player::pkey_to_pid(pkey);
         let player = Player::get_from_pid(&player_id);
         match player {
             Some(_) => Err(ERROR_PLAYER_ALREADY_EXISTS), // Player already exists
             None => {
-                let player = Player::new_from_pid(player_id);
+                let mut player = Player::new_from_pid(player_id);
+                // Set initial balance for new player
+                player.data.balance = NEW_PLAYER_INITIAL_BALANCE;
                 player.store();
                 Ok(())
             }

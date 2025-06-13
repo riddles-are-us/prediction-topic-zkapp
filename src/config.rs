@@ -40,6 +40,9 @@ pub const EVENT_PLAYER_UPDATE: u64 = 3;
 // Market constants
 pub const PLATFORM_FEE_RATE: u64 = 100; // 1% platform fee (100/10000)
 
+// New player initial balance
+pub const NEW_PLAYER_INITIAL_BALANCE: u64 = 10_000_000; // 1000万代币
+
 // Price precision constants
 pub const BASIS_POINTS_PRECISION: u64 = 10000;     // 10,000 basis points = 100%
 pub const PRICE_PRECISION: u64 = 1000000;          // 1,000,000 = 1.0 (higher precision for calculations)
