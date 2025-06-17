@@ -1,8 +1,8 @@
 import { Express } from "express";
+import mongoose from 'mongoose';
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
 import { BetEvent, BetModel, MarketEvent, MarketModel, docToJSON } from "./models.js";
-import mongoose from 'mongoose';
 
 const service = new Service(eventCallback, batchedCallback, extra);
 await service.initialize();
@@ -75,6 +75,45 @@ function extra(app: Express) {
     } catch (e) {
       console.log(e);
       res.status(500).send();
+    }
+  });
+
+  // Get recent transactions (bet and sell activities)
+  app.get("/data/recent/:count?", async (req: any, res) => {
+    try {
+      const count = parseInt(req.params.count) || 20; // 默认20笔交易
+      const maxCount = 100; // 最大限制100笔
+      const limitCount = Math.min(count, maxCount);
+      
+      // 查询最近的交易，按counter降序排列（最新的在前）
+      const doc = await BetModel.find({})
+        .sort({ counter: -1, index: -1 }) // 按counter和index降序排列
+        .limit(limitCount);
+
+      let data = doc.map((d: mongoose.Document) => {
+        const transaction = docToJSON(d);
+        // 添加交易类型标识
+        if (transaction.betType >= 10) {
+          transaction.transactionType = transaction.betType === 11 ? 'SELL_YES' : 'SELL_NO';
+          transaction.originalBetType = transaction.betType - 10; // 恢复原始bet类型
+        } else {
+          transaction.transactionType = transaction.betType === 1 ? 'BET_YES' : 'BET_NO';
+          transaction.originalBetType = transaction.betType;
+        }
+        return transaction;
+      });
+
+      res.status(200).send({
+        success: true,
+        data: data,
+        count: data.length,
+      });
+    } catch (e) {
+      console.log("Error fetching recent transactions:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch recent transactions"
+      });
     }
   });
 

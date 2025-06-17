@@ -129,6 +129,17 @@ export interface BetData {
     timestamp: string;
 }
 
+export interface TransactionData {
+    index: string;
+    pid: string[];
+    betType: number;
+    amount: string;
+    shares: string;
+    counter: string;
+    transactionType: 'BET_YES' | 'BET_NO' | 'SELL_YES' | 'SELL_NO';
+    originalBetType: number;
+}
+
 export interface StatsData {
     totalVolume: string;
     totalBets: number;
@@ -193,6 +204,16 @@ export class PredictionMarketAPI {
         const result = await response.json() as any;
         if (!result.success) {
             throw new Error(result.message || 'Failed to get player bets');
+        }
+        return result.data;
+    }
+
+    // Get recent transactions (bet and sell activities)
+    async getRecentTransactions(count: number = 20): Promise<TransactionData[]> {
+        const response = await fetch(`${this.baseUrl}/data/recent/${count}`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get recent transactions');
         }
         return result.data;
     }
@@ -417,6 +438,10 @@ export async function exampleUsage() {
         // Get market data
         const marketData = await api.getMarket();
         console.log("Market data:", marketData);
+
+        // Get recent transactions
+        const recentTransactions = await api.getRecentTransactions(10);
+        console.log("Recent 10 transactions:", recentTransactions);
 
         // Calculate prices and expected values
         if (marketData.yesLiquidity && marketData.noLiquidity) {
