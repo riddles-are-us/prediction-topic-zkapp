@@ -1,10 +1,11 @@
 import fetch from 'node-fetch';
 import { PlayerConvention, ZKWasmAppRpc, createCommand } from "zkwasm-minirollup-rpc";
 import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
+import { stringToU64Array } from "./models.js";
 
 export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
-// Command constants
+// Command constants - updated for multi-market
 const TICK = 0;
 const INSTALL_PLAYER = 1;
 const WITHDRAW = 2;
@@ -14,6 +15,7 @@ const SELL = 5;
 const RESOLVE = 6;
 const CLAIM = 7;
 const WITHDRAW_FEES = 8;
+const CREATE_MARKET = 9;
 
 // Fee constants - centralized to avoid duplication
 const PLATFORM_FEE_RATE = 100n; // 1%
@@ -51,15 +53,65 @@ export class Player extends PlayerConvention {
         }
     }
 
-    async placeBet(betType: number, amount: bigint) {
+    // Updated to include market_id
+    async placeBet(marketId: bigint, betType: number, amount: bigint) {
         let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(BET), [BigInt(betType), amount]);
+        let cmd = createCommand(nonce, BigInt(BET), [marketId, BigInt(betType), amount]);
         return await this.sendTransactionWithCommand(cmd);
     }
 
-    async claimWinnings() {
+    // Updated to include market_id
+    async sellShares(marketId: bigint, sellType: number, shares: bigint) {
         let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(CLAIM), []);
+        let cmd = createCommand(nonce, BigInt(SELL), [marketId, BigInt(sellType), shares]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    // Updated to include market_id
+    async claimWinnings(marketId: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(CLAIM), [marketId]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    // Updated to include market_id
+    async resolveMarket(marketId: bigint, outcome: boolean) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(RESOLVE), [marketId, outcome ? 1n : 0n]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    // Updated to include market_id
+    async withdrawFees(marketId: bigint) {
+        let nonce = await this.getNonce();
+        let cmd = createCommand(nonce, BigInt(WITHDRAW_FEES), [marketId]);
+        return await this.sendTransactionWithCommand(cmd);
+    }
+
+    // New function to create markets
+    async createMarket(
+        title: string,
+        startTime: bigint,
+        endTime: bigint,
+        resolutionTime: bigint,
+        yesLiquidity: bigint,
+        noLiquidity: bigint
+    ) {
+        let nonce = await this.getNonce();
+        const titleU64Array = stringToU64Array(title);
+        
+        // Build command: [cmd, title_len, ...title_u64s, start_time, end_time, resolution_time, yes_liquidity, no_liquidity]
+        const params = [
+            BigInt(titleU64Array.length),
+            ...titleU64Array,
+            startTime,
+            endTime,
+            resolutionTime,
+            yesLiquidity,
+            noLiquidity
+        ];
+        
+        let cmd = createCommand(nonce, BigInt(CREATE_MARKET), params);
         return await this.sendTransactionWithCommand(cmd);
     }
 
@@ -74,30 +126,11 @@ export class Player extends PlayerConvention {
         let cmd = createCommand(nonce, BigInt(DEPOSIT), [targetPid1, targetPid2, 0n, amount]);
         return await this.sendTransactionWithCommand(cmd);
     }
-
-    async resolveMarket(outcome: boolean) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(RESOLVE), [outcome ? 1n : 0n]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async withdrawFees() {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(WITHDRAW_FEES), []);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    async sellShares(sellType: number, shares: bigint) {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(SELL), [BigInt(sellType), shares]);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-
 }
 
-
+// Updated interfaces for multi-market support
 export interface MarketData {
+    marketId: string;
     title: string;
     description: string;
     startTime: string;
@@ -106,6 +139,8 @@ export interface MarketData {
     yesLiquidity: string;
     noLiquidity: string;
     totalVolume: string;
+    totalYesShares: string;
+    totalNoShares: string;
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: string;
@@ -113,25 +148,10 @@ export interface MarketData {
     noPrice: string;
 }
 
-export interface PlayerData {
-    balance: string;
-    yesShares: string;
-    noShares: string;
-    claimed: boolean;
-}
-
-export interface BetData {
-    pid1: string;
-    pid2: string;
-    betType: number;
-    amount: string;
-    shares: string;
-    timestamp: string;
-}
-
 export interface TransactionData {
     index: string;
     pid: string[];
+    marketId: string;
     betType: number;
     amount: string;
     shares: string;
@@ -140,13 +160,19 @@ export interface TransactionData {
     originalBetType: number;
 }
 
-export interface StatsData {
-    totalVolume: string;
-    totalBets: number;
-    totalPlayers: number;
-    totalFeesCollected: string;
+export interface LiquidityHistoryData {
+    counter: string;
     yesLiquidity: string;
     noLiquidity: string;
+    timestamp: string;
+}
+
+export interface PlayerMarketPosition {
+    pid: string[];
+    marketId: string;
+    yesShares: string;
+    noShares: string;
+    claimed: boolean;
 }
 
 export class PredictionMarketAPI {
@@ -158,9 +184,19 @@ export class PredictionMarketAPI {
         this.baseUrl = baseUrl;
     }
 
-    // Get market data
-    async getMarket(): Promise<MarketData> {
-        const response = await fetch(`${this.baseUrl}/data/market`);
+    // Get all markets
+    async getAllMarkets(): Promise<MarketData[]> {
+        const response = await fetch(`${this.baseUrl}/data/markets`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get markets data');
+        }
+        return result.data;
+    }
+
+    // Get specific market data
+    async getMarket(marketId: string): Promise<MarketData> {
+        const response = await fetch(`${this.baseUrl}/data/market/${marketId}`);
         const result = await response.json() as any;
         if (!result.success) {
             throw new Error(result.message || 'Failed to get market data');
@@ -168,142 +204,126 @@ export class PredictionMarketAPI {
         return result.data;
     }
 
-    // Get player data
-    async getPlayer(pid1: string, pid2: string): Promise<PlayerData> {
-        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}`);
+    // Get recent 20 transactions for specific market
+    async getMarketRecentTransactions(marketId: string): Promise<TransactionData[]> {
+        const response = await fetch(`${this.baseUrl}/data/market/${marketId}/recent`);
         const result = await response.json() as any;
         if (!result.success) {
-            throw new Error(result.message || 'Failed to get player data');
+            throw new Error(result.message || 'Failed to get market recent transactions');
         }
         return result.data;
     }
 
-    // Get market statistics
-    async getStats(): Promise<StatsData> {
-        const response = await fetch(`${this.baseUrl}/data/stats`);
+    // Get player's recent 20 transactions across all markets
+    async getPlayerRecentTransactions(pid1: string, pid2: string): Promise<TransactionData[]> {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}/recent`);
         const result = await response.json() as any;
         if (!result.success) {
-            throw new Error(result.message || 'Failed to get stats');
+            throw new Error(result.message || 'Failed to get player recent transactions');
         }
         return result.data;
     }
 
-    // Get all bets
-    async getAllBets(): Promise<BetData[]> {
-        const response = await fetch(`${this.baseUrl}/data/bets`);
+    // Get player's recent 20 transactions for specific market
+    async getPlayerMarketRecentTransactions(pid1: string, pid2: string, marketId: string): Promise<TransactionData[]> {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}/market/${marketId}/recent`);
         const result = await response.json() as any;
         if (!result.success) {
-            throw new Error(result.message || 'Failed to get bets data');
+            throw new Error(result.message || 'Failed to get player market recent transactions');
         }
         return result.data;
     }
 
-    // Get player's bets
-    async getPlayerBets(pid1: string, pid2: string): Promise<BetData[]> {
-        const response = await fetch(`${this.baseUrl}/data/bets/${pid1}/${pid2}`);
+    // Get player market position
+    async getPlayerMarketPosition(pid1: string, pid2: string, marketId: string): Promise<PlayerMarketPosition> {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}/market/${marketId}`);
         const result = await response.json() as any;
         if (!result.success) {
-            throw new Error(result.message || 'Failed to get player bets');
+            throw new Error(result.message || 'Failed to get player market position');
         }
         return result.data;
     }
 
-    // Get recent transactions (bet and sell activities)
-    async getRecentTransactions(count: number = 20): Promise<TransactionData[]> {
-        const response = await fetch(`${this.baseUrl}/data/recent/${count}`);
+    // Get all player positions across markets
+    async getPlayerAllPositions(pid1: string, pid2: string): Promise<PlayerMarketPosition[]> {
+        const response = await fetch(`${this.baseUrl}/data/player/${pid1}/${pid2}/positions`);
         const result = await response.json() as any;
         if (!result.success) {
-            throw new Error(result.message || 'Failed to get recent transactions');
+            throw new Error(result.message || 'Failed to get player positions');
         }
         return result.data;
     }
 
-    // Unified shares calculation function (betType: 1=YES, 0=NO)
+    // Get market liquidity history for recent 100 counters (only liquidity data)
+    async getMarketLiquidityHistory(marketId: string): Promise<LiquidityHistoryData[]> {
+        const response = await fetch(`${this.baseUrl}/data/market/${marketId}/liquidity`);
+        const result = await response.json() as any;
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to get market liquidity history');
+        }
+        return result.data;
+    }
+
+    // Calculation functions updated for specific market
     calculateShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
-        if (amount <= 0) return 0n;
-
-        // 向上取整计算费用：(amount * rate + basis - 1) / basis
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
-        const netAmount = BigInt(amount) - fee;
+        const betAmount = BigInt(amount);
+        const fee = (betAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
+        const netAmount = betAmount - fee;
+        
+        // AMM calculation: k = x * y
         const k = yesLiquidity * noLiquidity;
-        const isYesBet = betType === 1;
-
-        if (isYesBet) { // YES bet
+        
+        if (betType === 1) { // YES bet
             const newNoLiquidity = noLiquidity + netAmount;
             const newYesLiquidity = k / newNoLiquidity;
-            return yesLiquidity > newYesLiquidity ? yesLiquidity - newYesLiquidity : 0n;
+            return yesLiquidity - newYesLiquidity;
         } else { // NO bet
             const newYesLiquidity = yesLiquidity + netAmount;
             const newNoLiquidity = k / newYesLiquidity;
-            return noLiquidity > newNoLiquidity ? noLiquidity - newNoLiquidity : 0n;
+            return noLiquidity - newNoLiquidity;
         }
     }
 
-
-
-    // Calculate sell details (net payout and fee) - unified function
     calculateSellDetails(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): { netPayout: bigint, fee: bigint } {
-        if (shares <= 0) return { netPayout: 0n, fee: 0n };
-
+        const sharesToSell = BigInt(shares);
+        
+        // AMM calculation for selling
         const k = yesLiquidity * noLiquidity;
-        const isYesSell = sellType === 1;
-
-        let grossAmount = 0n;
-
-        if (isYesSell) { // Sell YES shares
-            const newYesLiquidity = yesLiquidity + BigInt(shares);
+        
+        let grossAmount: bigint;
+        if (sellType === 1) { // Selling YES shares
+            const newYesLiquidity = yesLiquidity + sharesToSell;
             const newNoLiquidity = k / newYesLiquidity;
-            if (noLiquidity > newNoLiquidity) {
-                grossAmount = noLiquidity - newNoLiquidity;
-            }
-        } else { // Sell NO shares
-            const newNoLiquidity = noLiquidity + BigInt(shares);
+            grossAmount = noLiquidity - newNoLiquidity;
+        } else { // Selling NO shares
+            const newNoLiquidity = noLiquidity + sharesToSell;
             const newYesLiquidity = k / newNoLiquidity;
-            if (yesLiquidity > newYesLiquidity) {
-                grossAmount = yesLiquidity - newYesLiquidity;
-            }
+            grossAmount = yesLiquidity - newYesLiquidity;
         }
-
-        if (grossAmount === 0n) {
-            return { netPayout: 0n, fee: 0n };
-        }
-
-        // 向上取整计算费用：(amount * rate + basis - 1) / basis
+        
         const fee = (grossAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netPayout = grossAmount - fee;
         
         return { netPayout, fee };
     }
 
-    // Calculate expected payout for selling shares (backward compatible)
     calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
-        const { netPayout } = this.calculateSellDetails(sellType, shares, yesLiquidity, noLiquidity);
-        return netPayout;
+        const result = this.calculateSellDetails(sellType, shares, yesLiquidity, noLiquidity);
+        return result.netPayout;
     }
 
-    // Get effective buy price per share
     getBuyPrice(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        if (amount <= 0) return 0;
-
         const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
         if (shares === 0n) return 0;
-
-        // Return price per share (1.0 = 1 token per share)
-        return Number(BigInt(amount) * 1000000n / shares) / 1000000;
+        return (amount * 1000000) / Number(shares); // Return price in terms of precision
     }
 
-    // Get effective sell price per share
     getSellPrice(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        if (shares <= 0) return 0;
-
         const payout = this.calculateSellValue(sellType, shares, yesLiquidity, noLiquidity);
-        if (payout === 0n) return 0;
-
-        // Return price per share (1.0 = 1 token per share)
-        return Number(payout * 1000000n / BigInt(shares)) / 1000000;
+        if (shares === 0) return 0;
+        return (Number(payout) * 1000000) / shares; // Return price in terms of precision
     }
 
-    // Calculate market impact (price change after trade)
     calculateMarketImpact(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): { 
         currentYesPrice: number, 
         currentNoPrice: number, 
@@ -312,25 +332,14 @@ export class PredictionMarketAPI {
     } {
         const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity);
         
-        if (amount <= 0) {
-            return {
-                currentYesPrice: currentPrices.yesPrice,
-                currentNoPrice: currentPrices.noPrice,
-                newYesPrice: currentPrices.yesPrice,
-                newNoPrice: currentPrices.noPrice
-            };
-        }
-
-        // Simulate the trade using unified calculation
-        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
-        // 向上取整计算费用：(amount * rate + basis - 1) / basis
-        const fee = (BigInt(amount) * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
-        const netAmount = BigInt(amount) - fee;
-
+        // Calculate new liquidity after bet
+        const betAmount = BigInt(amount);
+        const fee = (betAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
+        const netAmount = betAmount - fee;
+        
         const k = yesLiquidity * noLiquidity;
-        let newYesLiquidity = yesLiquidity;
-        let newNoLiquidity = noLiquidity;
-
+        
+        let newYesLiquidity: bigint, newNoLiquidity: bigint;
         if (betType === 1) { // YES bet
             newNoLiquidity = noLiquidity + netAmount;
             newYesLiquidity = k / newNoLiquidity;
@@ -338,9 +347,9 @@ export class PredictionMarketAPI {
             newYesLiquidity = yesLiquidity + netAmount;
             newNoLiquidity = k / newYesLiquidity;
         }
-
+        
         const newPrices = this.calculatePrices(newYesLiquidity, newNoLiquidity);
-
+        
         return {
             currentYesPrice: currentPrices.yesPrice,
             currentNoPrice: currentPrices.noPrice,
@@ -349,51 +358,71 @@ export class PredictionMarketAPI {
         };
     }
 
-    // Calculate slippage (difference between market price and effective price)
     calculateSlippage(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        if (amount <= 0) return 0;
-
-        const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity);
-        const currentPrice = betType === 1 ? currentPrices.yesPrice : currentPrices.noPrice;
+        const impact = this.calculateMarketImpact(betType, amount, yesLiquidity, noLiquidity);
         
-        const effectivePrice = this.getBuyPrice(betType, amount, yesLiquidity, noLiquidity);
-        
-        return Math.max(0, effectivePrice - currentPrice);
+        if (betType === 1) { // YES bet
+            return ((impact.newYesPrice - impact.currentYesPrice) / impact.currentYesPrice) * 100;
+        } else { // NO bet
+            return ((impact.newNoPrice - impact.currentNoPrice) / impact.currentNoPrice) * 100;
+        }
     }
 
-    // Calculate current prices
     calculatePrices(yesLiquidity: bigint, noLiquidity: bigint): { yesPrice: number, noPrice: number } {
         const totalLiquidity = yesLiquidity + noLiquidity;
         if (totalLiquidity === 0n) {
             return { yesPrice: 0.5, noPrice: 0.5 };
         }
-
-        const yesPrice = Number(noLiquidity * 1000000n / totalLiquidity) / 1000000;
-        const noPrice = Number(yesLiquidity * 1000000n / totalLiquidity) / 1000000;
-
+        
+        const yesPrice = Number(noLiquidity) / Number(totalLiquidity);
+        const noPrice = Number(yesLiquidity) / Number(totalLiquidity);
+        
         return { yesPrice, noPrice };
     }
 }
 
-// Transaction building utilities
-export function buildBetTransaction(nonce: number, betType: number, amount: bigint): bigint[] {
-    const commandWithNonce = BigInt(BET) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, BigInt(betType), amount, 0n, 0n];
+// Updated transaction builders for multi-market
+export function buildBetTransaction(nonce: number, marketId: bigint, betType: number, amount: bigint): bigint[] {
+    return [BigInt(nonce), BigInt(BET), marketId, BigInt(betType), amount];
 }
 
-export function buildSellTransaction(nonce: number, sellType: number, shares: bigint): bigint[] {
-    const commandWithNonce = BigInt(SELL) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, BigInt(sellType), shares, 0n, 0n];
+export function buildSellTransaction(nonce: number, marketId: bigint, sellType: number, shares: bigint): bigint[] {
+    return [BigInt(nonce), BigInt(SELL), marketId, BigInt(sellType), shares];
 }
 
-export function buildResolveTransaction(nonce: number, outcome: boolean): bigint[] {
-    const commandWithNonce = BigInt(RESOLVE) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, outcome ? 1n : 0n, 0n, 0n, 0n];
+export function buildResolveTransaction(nonce: number, marketId: bigint, outcome: boolean): bigint[] {
+    return [BigInt(nonce), BigInt(RESOLVE), marketId, outcome ? 1n : 0n];
 }
 
-export function buildClaimTransaction(nonce: number): bigint[] {
-    const commandWithNonce = BigInt(CLAIM) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, 0n, 0n, 0n, 0n];
+export function buildClaimTransaction(nonce: number, marketId: bigint): bigint[] {
+    return [BigInt(nonce), BigInt(CLAIM), marketId];
+}
+
+export function buildWithdrawFeesTransaction(nonce: number, marketId: bigint): bigint[] {
+    return [BigInt(nonce), BigInt(WITHDRAW_FEES), marketId];
+}
+
+export function buildCreateMarketTransaction(
+    nonce: number,
+    title: string,
+    startTime: bigint,
+    endTime: bigint,
+    resolutionTime: bigint,
+    yesLiquidity: bigint,
+    noLiquidity: bigint
+): bigint[] {
+    const titleU64Array = stringToU64Array(title);
+    return [
+        BigInt(nonce),
+        BigInt(CREATE_MARKET),
+        BigInt(titleU64Array.length),
+        ...titleU64Array,
+        startTime,
+        endTime,
+        resolutionTime,
+        yesLiquidity,
+        noLiquidity
+    ];
 }
 
 export function buildWithdrawTransaction(
@@ -402,8 +431,7 @@ export function buildWithdrawTransaction(
     addressHigh: bigint, 
     addressLow: bigint
 ): bigint[] {
-    const commandWithNonce = BigInt(WITHDRAW) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, 0n, amount, addressHigh, addressLow];
+    return [BigInt(nonce), BigInt(WITHDRAW), 0n, amount, addressHigh, addressLow];
 }
 
 export function buildDepositTransaction(
@@ -412,73 +440,32 @@ export function buildDepositTransaction(
     targetPid2: bigint,
     amount: bigint
 ): bigint[] {
-    const commandWithNonce = BigInt(DEPOSIT) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, targetPid1, targetPid2, 0n, amount];
+    return [BigInt(nonce), BigInt(DEPOSIT), targetPid1, targetPid2, 0n, amount];
 }
 
 export function buildInstallPlayerTransaction(nonce: number): bigint[] {
-    const commandWithNonce = BigInt(INSTALL_PLAYER) | (BigInt(nonce) << 16n);
-    return [commandWithNonce, 0n, 0n, 0n, 0n];
+    return [BigInt(nonce), BigInt(INSTALL_PLAYER)];
 }
 
-// Example usage
 export async function exampleUsage() {
     const api = new PredictionMarketAPI();
-    const rpc = new ZKWasmAppRpc("http://localhost:3000");
     
-    // Create player instance (replace with actual key)
-    const playerKey = "123";
-    const player = new Player(playerKey, rpc);
-
-    try {
-        // Install player
-        console.log("Installing player...");
-        await player.installPlayer();
-
-        // Get market data
-        const marketData = await api.getMarket();
-        console.log("Market data:", marketData);
-
-        // Get recent transactions
-        const recentTransactions = await api.getRecentTransactions(10);
-        console.log("Recent 10 transactions:", recentTransactions);
-
-        // Calculate prices and expected values
-        if (marketData.yesLiquidity && marketData.noLiquidity) {
-            const yesLiquidity = BigInt(marketData.yesLiquidity);
-            const noLiquidity = BigInt(marketData.noLiquidity);
-            
-            // Current market prices
-            const prices = api.calculatePrices(yesLiquidity, noLiquidity);
-            console.log(`Current market prices: YES=${prices.yesPrice.toFixed(3)}, NO=${prices.noPrice.toFixed(3)}`);
-
-            // Calculate buy prices for 1000 units
-            const yesBuyPrice = api.getBuyPrice(1, 1000, yesLiquidity, noLiquidity);
-            const noBuyPrice = api.getBuyPrice(0, 1000, yesLiquidity, noLiquidity);
-            console.log(`Buy prices for 1000 units: YES=${yesBuyPrice.toFixed(3)}, NO=${noBuyPrice.toFixed(3)}`);
-
-            // Calculate market impact
-            const yesImpact = api.calculateMarketImpact(1, 1000, yesLiquidity, noLiquidity);
-            console.log(`YES bet impact: ${yesImpact.currentYesPrice.toFixed(3)} → ${yesImpact.newYesPrice.toFixed(3)}`);
-
-            // Calculate slippage
-            const yesSlippage = api.calculateSlippage(1, 1000, yesLiquidity, noLiquidity);
-            console.log(`YES bet slippage: ${yesSlippage.toFixed(3)}`);
-
-            // Calculate expected shares and sell prices
-            const expectedYesShares = api.calculateShares(1, 1000, yesLiquidity, noLiquidity);
-            const yesSellPrice = api.getSellPrice(1, Number(expectedYesShares), yesLiquidity, noLiquidity);
-            console.log(`Expected YES shares: ${expectedYesShares}, sell price: ${yesSellPrice.toFixed(3)}`);
-
-            // Place a bet
-            console.log("Placing YES bet...");
-            await player.placeBet(1, 1000n); // YES bet for 1000 units
-
-            // Get updated market stats
-            const stats = await api.getStats();
-            console.log("Updated market stats:", stats);
-        }
-    } catch (error) {
-        console.error("Error in example usage:", error);
+    // Get all markets
+    const markets = await api.getAllMarkets();
+    console.log("All markets:", markets);
+    
+    // Get specific market
+    if (markets.length > 0) {
+        const marketId = markets[0].marketId;
+        const market = await api.getMarket(marketId);
+        console.log("Market details:", market);
+        
+        // Get market recent transactions
+        const marketTransactions = await api.getMarketRecentTransactions(marketId);
+        console.log("Market recent transactions:", marketTransactions);
+        
+        // Get market liquidity history
+        const liquidityHistory = await api.getMarketLiquidityHistory(marketId);
+        console.log("Market liquidity history:", liquidityHistory);
     }
 } 

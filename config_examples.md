@@ -11,8 +11,8 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     start_time: start_time_in_ticks,
     end_time: end_time_in_ticks,
     resolution_time: resolution_time_in_ticks,
-    initial_yes_liquidity: 1000000,
-    initial_no_liquidity: 1000000,
+    initial_yes_liquidity: 100000,
+    initial_no_liquidity: 100000,
 };
 ```
 
@@ -23,6 +23,7 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 - 1 hour = 720 ticks  
 - 1 day = 17280 ticks
 - 1 week = 120960 ticks
+- 4 months = 2073600 ticks (120 days)
 
 ## Liquidity Configuration
 
@@ -77,8 +78,8 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     start_time: 0,
     end_time: TICKS_PER_DAY,         // 17280 ticks
     resolution_time: TICKS_PER_DAY,
-    initial_yes_liquidity: 1000000,  // Standard liquidity
-    initial_no_liquidity: 1000000,
+    initial_yes_liquidity: 100000,  // Small liquidity for testing
+    initial_no_liquidity: 100000,
 };
 ```
 

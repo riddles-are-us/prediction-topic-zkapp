@@ -1,12 +1,12 @@
 use serde::Serialize;
 use zkwasm_rest_abi::StorageData;
-use crate::config::{DEFAULT_MARKET, PRICE_PRECISION};
+use crate::config::PRICE_PRECISION;
 use crate::error::*;
 use crate::math_safe::*;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct MarketData {
-    pub title: String,
+    pub title: Vec<u64>,  // Title encoded as Vec<u64> (8 bytes per u64)
     pub description: String,
     pub start_time: u64,
     pub end_time: u64,
@@ -25,10 +25,26 @@ pub struct MarketData {
 }
 
 impl MarketData {
-    pub fn new(title: String, description: String, start_time: u64, end_time: u64, resolution_time: u64) -> Result<Self, u32> {
+    pub fn new_with_title_u64_and_liquidity(
+        title: Vec<u64>, 
+        description: String, 
+        start_time: u64, 
+        end_time: u64, 
+        resolution_time: u64,
+        initial_yes_liquidity: u64,
+        initial_no_liquidity: u64
+    ) -> Result<Self, u32> {
+        // 验证时间参数
+        if start_time >= end_time {
+            return Err(crate::error::ERROR_INVALID_MARKET_TIME);
+        }
+        if end_time > resolution_time {
+            return Err(crate::error::ERROR_INVALID_MARKET_TIME);
+        }
+        
         // 验证初始流动性
-        validate_liquidity(DEFAULT_MARKET.initial_yes_liquidity)?;
-        validate_liquidity(DEFAULT_MARKET.initial_no_liquidity)?;
+        validate_liquidity(initial_yes_liquidity)?;
+        validate_liquidity(initial_no_liquidity)?;
         
         Ok(MarketData {
             title,
@@ -37,8 +53,8 @@ impl MarketData {
             end_time,
             resolution_time,
             // Virtual liquidity for AMM pricing
-            yes_liquidity: DEFAULT_MARKET.initial_yes_liquidity,
-            no_liquidity: DEFAULT_MARKET.initial_no_liquidity,
+            yes_liquidity: initial_yes_liquidity,
+            no_liquidity: initial_no_liquidity,
             // Real money tracking
             prize_pool: 0,
             total_volume: 0,
@@ -48,6 +64,46 @@ impl MarketData {
             outcome: None,
             total_fees_collected: 0,
         })
+    }
+
+
+
+    // Helper function to convert string to Vec<u64>
+    pub fn string_to_u64_vec(s: &str) -> Vec<u64> {
+        let bytes = s.as_bytes();
+        let mut result = Vec::new();
+        
+        for chunk in bytes.chunks(8) {
+            let mut value = 0u64;
+            for (i, &byte) in chunk.iter().enumerate() {
+                value |= (byte as u64) << (i * 8);
+            }
+            result.push(value);
+        }
+        
+        result
+    }
+
+    // Helper function to convert Vec<u64> back to string
+    pub fn u64_vec_to_string(title: &[u64]) -> String {
+        let mut bytes = Vec::new();
+        
+        for &value in title {
+            for i in 0..8 {
+                let byte = ((value >> (i * 8)) & 0xFF) as u8;
+                if byte != 0 {  // Stop at null terminator
+                    bytes.push(byte);
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    pub fn get_title_string(&self) -> String {
+        Self::u64_vec_to_string(&self.title)
     }
 
     pub fn is_active(&self, current_time: u64) -> bool {
@@ -76,15 +132,24 @@ impl MarketData {
         calculate_price_safe(self.yes_liquidity, total_liquidity)
     }
 
+    // 验证投注类型的辅助函数
+    fn validate_bet_type(bet_type: u64) -> Result<bool, u32> {
+        match bet_type {
+            0 => Ok(false), // NO bet
+            1 => Ok(true),  // YES bet  
+            _ => Err(crate::error::ERROR_INVALID_BET_TYPE),
+        }
+    }
+
     // 统一的份额计算函数（bet_type: 1=YES, 0=NO）
     pub fn calculate_shares(&self, bet_type: u64, bet_amount: u64) -> Result<u64, u32> {
         validate_bet_amount(bet_amount)?;
+        let is_yes_bet = Self::validate_bet_type(bet_type)?;
         
         let net_amount = calculate_net_amount_safe(bet_amount)?;
         
         // 安全的 AMM 计算
         let k = calculate_k_safe(self.yes_liquidity, self.no_liquidity)?;
-        let is_yes_bet = bet_type == 1;
         
         let (new_yes_liquidity, new_no_liquidity, original_liquidity) = if is_yes_bet {
             let new_no = safe_add(self.no_liquidity, net_amount)?;
@@ -110,11 +175,12 @@ impl MarketData {
     // 统一的卖出份额计算（返回净收益和费用）
     pub fn calculate_sell_details(&self, sell_type: u64, shares_to_sell: u64) -> Result<(u64, u64), u32> {
         validate_shares(shares_to_sell)?;
+        let is_yes_sell = Self::validate_bet_type(sell_type)?;
         
-        let (total_shares, is_yes_sell) = if sell_type == 1 {
-            (self.total_yes_shares, true)
+        let total_shares = if is_yes_sell {
+            self.total_yes_shares
         } else {
-            (self.total_no_shares, false)
+            self.total_no_shares
         };
         
         if total_shares == 0 {
@@ -348,9 +414,15 @@ impl MarketData {
 
 impl StorageData for MarketData {
     fn from_data(u64data: &mut std::slice::IterMut<u64>) -> Self {
+        let title_len = *u64data.next().unwrap() as usize;
+        let mut title = Vec::new();
+        for _ in 0..title_len {
+            title.push(*u64data.next().unwrap());
+        }
+        
         MarketData {
-            title: "Prediction Market".to_string(),
-            description: "Will the event happen?".to_string(),
+            title,
+            description: "Prediction Market".to_string(),
             start_time: *u64data.next().unwrap(),
             end_time: *u64data.next().unwrap(),
             resolution_time: *u64data.next().unwrap(),
@@ -372,6 +444,8 @@ impl StorageData for MarketData {
     }
 
     fn to_data(&self, data: &mut Vec<u64>) {
+        data.push(self.title.len() as u64);
+        data.extend_from_slice(&self.title);
         data.push(self.start_time);
         data.push(self.end_time);
         data.push(self.resolution_time);

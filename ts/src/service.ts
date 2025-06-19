@@ -2,7 +2,7 @@ import { Express } from "express";
 import mongoose from 'mongoose';
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { BetEvent, BetModel, MarketEvent, MarketModel, docToJSON } from "./models.js";
+import { BetEvent, BetModel, MarketEvent, MarketModel, PlayerMarketPositionModel, docToJSON, u64ArrayToString } from "./models.js";
 
 const service = new Service(eventCallback, batchedCallback, extra);
 await service.initialize();
@@ -10,121 +10,294 @@ await service.initialize();
 let txStateManager = new TxStateManager(merkleRootToBeHexString(service.merkleRoot));
 
 function extra(app: Express) {
-  // Fetch the market data event start from [timestamp] with limit
-  app.get("/data/market/:timestamp", async (req: any, res) => {
+  // Get all markets
+  app.get("/data/markets", async (req: any, res) => {
     try {
-      let limit = req.query.limit;
-      if (!limit) {
-          limit = 100;
-      }
-      let forward = req.query.forward ? true : false;
-      // console.log("timestamp is", req.params.timestamp);
-      // console.log("limit is", req.params.timestamp);
-      let doc;
-      if (forward) {
-        // 向前查询：获取大于timestamp的数据，按counter升序排列
-        doc = await MarketModel.find({ counter: { $gt: BigInt(req.params.timestamp) } })
-            .sort({ counter: 1 })
-            .limit(limit);
-    }
-    else {
-        // 向后查询：获取小于等于timestamp的数据，按counter降序排列（最近的优先）
-        doc = await MarketModel.find({ counter: { $lte: BigInt(req.params.timestamp) } })
-            .sort({ counter: -1 })
-            .limit(limit);
-    }
-      //doc = await MarketModel.find();
+      const doc = await MarketModel.find({}).sort({ marketId: 1 });
       let data = doc.map((d) => {
-        return docToJSON(d);
+        const market = docToJSON(d);
+        // Convert title from u64 array if needed
+        if (market.titleU64) {
+          market.title = u64ArrayToString(market.titleU64);
+        }
+        return market;
       });
-      res.status(201).send({
+      res.status(200).send({
         success: true,
         data: data,
       });
     } catch (e) {
-      console.log(e);
-      res.status(500).send();
+      console.log("Error fetching markets:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch markets"
+      });
     }
   });
 
-  app.get("/data/history/:pid1/:pid2", async (req: any, res) => {
+  // Get specific market by ID
+  app.get("/data/market/:marketId", async (req: any, res) => {
     try {
-      let pid1 = req.params.pid1;
-      let pid2 = req.params.pid2;
-      const skip = parseInt(req.query.skip) || 0;
-      const limit = parseInt(req.query.limit) || 30;
-      const [count, doc] = await Promise.all([
-        BetModel.countDocuments({
-          "pid": [pid1, pid2],
-        }),
-        BetModel.find({
-          "pid": [pid1, pid2],
-        })
-          .skip(skip)
-          .limit(limit),
-      ]);
-
-      let data = doc.map((d: mongoose.Document) => {
-        return docToJSON(d);
-      });
-      res.status(201).send({
-        success: true,
-        data: data,
-        count: count,
-      });
-    } catch (e) {
-      console.log(e);
-      res.status(500).send();
-    }
-  });
-
-  // Get recent transactions (bet and sell activities)
-  app.get("/data/recent/:count?", async (req: any, res) => {
-    try {
-      const count = parseInt(req.params.count) || 20; // 默认20笔交易
-      const maxCount = 100; // 最大限制100笔
-      const limitCount = Math.min(count, maxCount);
+      const marketId = BigInt(req.params.marketId);
+      const doc = await MarketModel.findOne({ marketId });
       
-      // 查询最近的交易，按counter降序排列（最新的在前）
-      const doc = await BetModel.find({})
-        .sort({ counter: -1, index: -1 }) // 按counter和index降序排列
-        .limit(limitCount);
+      if (!doc) {
+        res.status(404).send({
+          success: false,
+          error: "Market not found"
+        });
+        return;
+      }
+      
+      const market = docToJSON(doc);
+      // Convert title from u64 array if needed
+      if (market.titleU64) {
+        market.title = u64ArrayToString(market.titleU64);
+      }
+      
+      res.status(200).send({
+        success: true,
+        data: market,
+      });
+    } catch (e) {
+      console.log("Error fetching market:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch market"
+      });
+    }
+  });
+
+  // Get recent 20 transactions for specific market
+  app.get("/data/market/:marketId/recent", async (req: any, res) => {
+    try {
+      const marketId = BigInt(req.params.marketId);
+      
+      const doc = await BetModel.find({ marketId })
+        .sort({ counter: -1, index: -1 })
+        .limit(20);
 
       let data = doc.map((d: mongoose.Document) => {
         const transaction = docToJSON(d);
-        // 添加交易类型标识
+        // Add transaction type
         if (transaction.betType >= 10) {
           transaction.transactionType = transaction.betType === 11 ? 'SELL_YES' : 'SELL_NO';
-          transaction.originalBetType = transaction.betType - 10; // 恢复原始bet类型
+          transaction.originalBetType = transaction.betType - 10;
         } else {
           transaction.transactionType = transaction.betType === 1 ? 'BET_YES' : 'BET_NO';
           transaction.originalBetType = transaction.betType;
         }
         return transaction;
       });
-
+      
       res.status(200).send({
         success: true,
         data: data,
-        count: data.length,
       });
     } catch (e) {
-      console.log("Error fetching recent transactions:", e);
+      console.log("Error fetching market recent transactions:", e);
       res.status(500).send({
         success: false,
-        error: "Failed to fetch recent transactions"
+        error: "Failed to fetch market recent transactions"
       });
     }
   });
 
-    // All data is now accessed directly via RPC queries (rpc.queryState())
-    // No HTTP API endpoints needed as data is fetched from blockchain state directly
+  // Get player's recent 20 transactions across all markets
+  app.get("/data/player/:pid1/:pid2/recent", async (req: any, res) => {
+    try {
+      const pid1 = BigInt(req.params.pid1);
+      const pid2 = BigInt(req.params.pid2);
+      
+      const doc = await BetModel.find({
+        pid: [pid1, pid2],
+      })
+        .sort({ counter: -1, index: -1 })
+        .limit(20);
+
+      let data = doc.map((d: mongoose.Document) => {
+        const transaction = docToJSON(d);
+        // Add transaction type
+        if (transaction.betType >= 10) {
+          transaction.transactionType = transaction.betType === 11 ? 'SELL_YES' : 'SELL_NO';
+          transaction.originalBetType = transaction.betType - 10;
+        } else {
+          transaction.transactionType = transaction.betType === 1 ? 'BET_YES' : 'BET_NO';
+          transaction.originalBetType = transaction.betType;
+        }
+        return transaction;
+      });
+      
+      res.status(200).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log("Error fetching player recent transactions:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player recent transactions"
+      });
+    }
+  });
+
+  // Get player's recent 20 transactions for specific market
+  app.get("/data/player/:pid1/:pid2/market/:marketId/recent", async (req: any, res) => {
+    try {
+      const pid1 = BigInt(req.params.pid1);
+      const pid2 = BigInt(req.params.pid2);
+      const marketId = BigInt(req.params.marketId);
+      
+      const doc = await BetModel.find({
+        pid: [pid1, pid2],
+        marketId: marketId
+      })
+        .sort({ counter: -1, index: -1 })
+        .limit(20);
+
+      let data = doc.map((d: mongoose.Document) => {
+        const transaction = docToJSON(d);
+        // Add transaction type
+        if (transaction.betType >= 10) {
+          transaction.transactionType = transaction.betType === 11 ? 'SELL_YES' : 'SELL_NO';
+          transaction.originalBetType = transaction.betType - 10;
+        } else {
+          transaction.transactionType = transaction.betType === 1 ? 'BET_YES' : 'BET_NO';
+          transaction.originalBetType = transaction.betType;
+        }
+        return transaction;
+      });
+      
+      res.status(200).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log("Error fetching player market recent transactions:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player market recent transactions"
+      });
+    }
+  });
+
+  // Get player market position
+  app.get("/data/player/:pid1/:pid2/market/:marketId", async (req: any, res) => {
+    try {
+      const pid1 = BigInt(req.params.pid1);
+      const pid2 = BigInt(req.params.pid2);
+      const marketId = BigInt(req.params.marketId);
+      
+      const doc = await PlayerMarketPositionModel.findOne({
+        pid: [pid1, pid2],
+        marketId: marketId
+      });
+      
+      let data;
+      if (doc) {
+        data = docToJSON(doc);
+      } else {
+        // Return default position if not found
+        data = {
+          pid: [pid1.toString(), pid2.toString()],
+          marketId: marketId.toString(),
+          yesShares: "0",
+          noShares: "0",
+          claimed: false
+        };
+      }
+      
+      res.status(200).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log("Error fetching player market position:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player market position"
+      });
+    }
+  });
+
+  // Get all player positions across markets
+  app.get("/data/player/:pid1/:pid2/positions", async (req: any, res) => {
+    try {
+      const pid1 = BigInt(req.params.pid1);
+      const pid2 = BigInt(req.params.pid2);
+      
+      const doc = await PlayerMarketPositionModel.find({
+        pid: [pid1, pid2]
+      });
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(200).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log("Error fetching player positions:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player positions"
+      });
+    }
+  });
+
+  // Get market liquidity history for recent 100 counters (only liquidity data)
+  app.get("/data/market/:marketId/liquidity", async (req: any, res) => {
+    try {
+      const marketId = BigInt(req.params.marketId);
+      
+      // Get the latest counter for this market
+      const latestMarket = await MarketModel.findOne({ marketId }).sort({ counter: -1 });
+      if (!latestMarket) {
+        res.status(404).send({
+          success: false,
+          error: "Market not found"
+        });
+        return;
+      }
+      
+      const latestCounter = latestMarket.counter;
+      const startCounter = latestCounter - 100n < 0n ? 0n : latestCounter - 100n;
+      
+      // Get market data for recent 100 counters
+      const doc = await MarketModel.find({
+        marketId: marketId,
+        counter: { $gte: startCounter, $lte: latestCounter }
+      }).sort({ counter: 1 });
+      
+      let data = doc.map((d) => {
+        const market = docToJSON(d);
+        
+        return {
+          counter: market.counter,
+          yesLiquidity: market.yesLiquidity,
+          noLiquidity: market.noLiquidity,
+          timestamp: market.counter // Using counter as timestamp
+        };
+      });
+      
+      res.status(200).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.log("Error fetching market liquidity history:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch market liquidity history"
+      });
+    }
+  });
 }
 
 service.serve();
 
-const EVENT_MARKET_UPDATE = 2;
-const EVENT_BET_UPDATE = 3;
+const EVENT_MARKET_UPDATE = 1;
+const EVENT_BET_UPDATE = 2;
 
 async function batchedCallback(_arg: TxWitness[], _preMerkle: string, postMerkle: string) {
     await txStateManager.moveToCommit(postMerkle);
@@ -158,7 +331,7 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
             throw new Error("save event to db failed");
         }
     } catch (e) {
-        console.log(e);
+        console.log("Event save error:", e);
         console.log("event ignored");
     }
 
@@ -167,7 +340,7 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
         let eventType = Number(data[i] >> 32n);
         let eventLength = data[i] & ((1n << 32n) - 1n);
         let eventData = data.slice(i + 1, i + 1 + Number(eventLength));
-        console.log("event", eventType, eventLength, eventData);
+        console.log("Processing event:", eventType, eventLength, eventData);
 
         switch (eventType) {
             case EVENT_MARKET_UPDATE:
@@ -175,7 +348,19 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
                     console.log("market update event");
                     let market = MarketEvent.fromEvent(eventData);
                     let marketInfo = market.toObject();
-                    await MarketModel.findOneAndUpdate({counter: marketInfo.counter}, marketInfo, { upsert: true });
+                    
+                    // Update market with new liquidity data
+                    await MarketModel.findOneAndUpdate(
+                        { marketId: marketInfo.marketId }, 
+                        { 
+                            $set: {
+                                counter: marketInfo.counter,
+                                yesLiquidity: marketInfo.yesLiquidity,
+                                noLiquidity: marketInfo.noLiquidity
+                            }
+                        }, 
+                        { upsert: false } // Don't create new markets via events
+                    );
                     console.log("saved market update", market);
                 }
                 break;
@@ -183,15 +368,37 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
                 {
                     console.log("bet update event");
                     let bet = BetEvent.fromEvent(eventData);
-                    let doc = new BetModel(bet.toObject());
+                    let betData = bet.toObject();
+                    
+                    // Save bet
+                    let doc = new BetModel(betData);
                     await doc.save();
-                    console.log("saved bet", bet);
+                    
+                    // Update or create player market position
+                    const positionUpdate = {
+                        $inc: betData.betType >= 10 ? 
+                            // Selling shares (betType 11=SELL_YES, 12=SELL_NO)
+                            (betData.betType === 11 ? { yesShares: -betData.shares } : { noShares: -betData.shares }) :
+                            // Buying shares (betType 1=YES, 0=NO)
+                            (betData.betType === 1 ? { yesShares: betData.shares } : { noShares: betData.shares })
+                    };
+                    
+                    await PlayerMarketPositionModel.findOneAndUpdate(
+                        { 
+                            pid: betData.pid,
+                            marketId: betData.marketId
+                        },
+                        positionUpdate,
+                        { upsert: true, setDefaultsOnInsert: true }
+                    );
+                    
+                    console.log("saved bet and updated position", bet);
                 }
                 break;
             default:
-                console.log("unknown event");
-                process.exit(1);
-                //break;
+                console.log("unknown event type:", eventType);
+                // Don't exit on unknown events, just log them
+                break;
         }
         i += 1 + Number(eventLength);
     }

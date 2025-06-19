@@ -71,10 +71,10 @@ lazy_static::lazy_static! {
         title: "Bitcoin $100K by 2024",
         description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
         start_time: 0,      // Start immediately (counter = 0)
-        end_time: 17280,    // End after 1 day (17280 ticks = 86400 seconds)
-        resolution_time: 17280, // Resolution time same as end time
-        initial_yes_liquidity: 1000000, // Initial YES liquidity for AMM
-        initial_no_liquidity: 1000000,  // Initial NO liquidity for AMM
+        end_time: TICKS_PER_4_MONTHS,    // End after 4 months
+        resolution_time: TICKS_PER_4_MONTHS, // Resolution time same as end time (4 months)
+        initial_yes_liquidity: 100000, // Initial YES liquidity for AMM (small liquidity)
+        initial_no_liquidity: 100000,  // Initial NO liquidity for AMM (small liquidity)
     };
 }
 
@@ -83,6 +83,7 @@ pub const SECONDS_PER_TICK: u64 = 5;
 pub const TICKS_PER_MINUTE: u64 = 12;
 pub const TICKS_PER_HOUR: u64 = 720;
 pub const TICKS_PER_DAY: u64 = 17280;
+pub const TICKS_PER_4_MONTHS: u64 = 2073600; // 120 days × 17280 ticks/day
 
 impl DefaultMarketConfig {
     /// Convert seconds to ticks

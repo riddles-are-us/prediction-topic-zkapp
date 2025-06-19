@@ -212,9 +212,9 @@ mod tests {
 
     #[test]
     fn test_calculate_k_safe_normal() {
-        let result = calculate_k_safe(1000000, 1000000);
+        let result = calculate_k_safe(100000, 100000);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1000000000000u128);
+        assert_eq!(result.unwrap(), 10000000000u128);
     }
 
     #[test]

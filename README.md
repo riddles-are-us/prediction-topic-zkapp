@@ -202,10 +202,10 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "Bitcoin $100K by 2024",
     description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
     start_time: 0,      // Start immediately
-    end_time: 17280,    // End after 1 day
-    resolution_time: 17280, // Resolution time
-    initial_yes_liquidity: 1000000, // Initial YES liquidity for AMM
-    initial_no_liquidity: 1000000,  // Initial NO liquidity for AMM
+    end_time: TICKS_PER_4_MONTHS,    // End after 4 months (120 days)
+    resolution_time: TICKS_PER_4_MONTHS, // Resolution time (4 months)
+    initial_yes_liquidity: 100000, // Initial YES liquidity for AMM (small liquidity)
+    initial_no_liquidity: 100000,  // Initial NO liquidity for AMM (small liquidity)
 };
 ```
 
@@ -216,8 +216,9 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 - **Time Unit**: Based on counter value, each tick = 5 seconds
 - **Time Conversion Constants**:
   - `TICKS_PER_MINUTE = 12`
-  - `TICKS_PER_HOUR = 720` 
+  - `TICKS_PER_HOUR = 720`
   - `TICKS_PER_DAY = 17280`
+  - `TICKS_PER_4_MONTHS = 2073600`
 
 ### Time Configuration Examples
 

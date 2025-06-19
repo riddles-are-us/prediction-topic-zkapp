@@ -287,27 +287,37 @@ mod market_safe_tests {
     use crate::error::*;
     use crate::math_safe::{MAX_BET_AMOUNT, MAX_SHARES};
 
-    #[test]
-    fn test_safe_market_creation() {
-        let market = MarketData::new(
-            "Test Market".to_string(),
+    fn create_test_market() -> MarketData {
+        let title = MarketData::string_to_u64_vec("Test Market");
+        MarketData::new_with_title_u64_and_liquidity(
+            title,
             "Test Description".to_string(),
             0,
             1000,
-            1000
+            1000,
+            1_000_000, // initial_yes_liquidity
+            1_000_000  // initial_no_liquidity
+        ).unwrap()
+    }
+
+    #[test]
+    fn test_safe_market_creation() {
+        let title = MarketData::string_to_u64_vec("Test Market");
+        let market = MarketData::new_with_title_u64_and_liquidity(
+            title,
+            "Test Description".to_string(),
+            0,
+            1000,
+            1000,
+            1_000_000, // initial_yes_liquidity
+            1_000_000  // initial_no_liquidity
         );
         assert!(market.is_ok());
     }
 
     #[test]
     fn test_safe_bet_amount_limits() {
-        let mut market = MarketData::new(
-            "Test Market".to_string(),
-            "Test Description".to_string(),
-            0,
-            1000,
-            1000
-        ).unwrap();
+        let mut market = create_test_market();
         
         // 测试过大投注
         let result = market.place_bet(1, MAX_BET_AMOUNT + 1);
@@ -324,13 +334,7 @@ mod market_safe_tests {
 
     #[test]
     fn test_safe_price_calculations() {
-        let market = MarketData::new(
-            "Test Market".to_string(),
-            "Test Description".to_string(),
-            0,
-            1000,
-            1000
-        ).unwrap();
+        let market = create_test_market();
         
         // 测试价格计算
         let yes_price = market.get_yes_price();
@@ -346,13 +350,7 @@ mod market_safe_tests {
 
     #[test]
     fn test_safe_shares_calculation() {
-        let market = MarketData::new(
-            "Test Market".to_string(),
-            "Test Description".to_string(),
-            0,
-            1000,
-            1000
-        ).unwrap();
+        let market = create_test_market();
         
         // 测试正常份额计算
         let shares = market.calculate_shares(1, 10000);
@@ -366,13 +364,7 @@ mod market_safe_tests {
 
     #[test]
     fn test_safe_sell_operations() {
-        let mut market = MarketData::new(
-            "Test Market".to_string(),
-            "Test Description".to_string(),
-            0,
-            1000,
-            1000
-        ).unwrap();
+        let mut market = create_test_market();
         
         // 先投注获得份额
         let shares = market.place_bet(1, 10000).unwrap();
@@ -392,13 +384,7 @@ mod market_safe_tests {
 
     #[test]
     fn test_safe_payout_calculation() {
-        let mut market = MarketData::new(
-            "Test Market".to_string(),
-            "Test Description".to_string(),
-            0,
-            1000,
-            1000
-        ).unwrap();
+        let mut market = create_test_market();
         
         // 投注并解决市场
         let yes_shares = market.place_bet(1, 10000).unwrap();
@@ -414,5 +400,46 @@ mod market_safe_tests {
         // NO持有者应该没有奖金
         let payout = market.calculate_payout(0, no_shares);
         assert_eq!(payout.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_title_encoding_and_decoding() {
+        let original_title = "Test Market Title";
+        let title_u64_vec = MarketData::string_to_u64_vec(original_title);
+        let decoded_title = MarketData::u64_vec_to_string(&title_u64_vec);
+        
+        assert_eq!(original_title, decoded_title);
+    }
+
+    #[test]
+    fn test_long_title_encoding() {
+        let long_title = "Predict CASADADSA Will Launch on binance perp or not in three months";
+        let title_u64_vec = MarketData::string_to_u64_vec(long_title);
+        
+        // Should need 9 u64s for 68 characters
+        assert_eq!(title_u64_vec.len(), 9);
+        
+        let decoded_title = MarketData::u64_vec_to_string(&title_u64_vec);
+        assert_eq!(long_title, decoded_title);
+    }
+
+    #[test]
+    fn test_market_with_custom_liquidity() {
+        let title = MarketData::string_to_u64_vec("Custom Liquidity Market");
+        let market = MarketData::new_with_title_u64_and_liquidity(
+            title,
+            "Market with custom liquidity".to_string(),
+            0,
+            1000,
+            1000,
+            500_000,  // Low YES liquidity
+            2_000_000 // High NO liquidity  
+        ).unwrap();
+        
+        // YES should be more expensive due to lower liquidity
+        let yes_price = market.get_yes_price().unwrap();
+        let no_price = market.get_no_price().unwrap();
+        
+        assert!(yes_price > no_price);
     }
 } 

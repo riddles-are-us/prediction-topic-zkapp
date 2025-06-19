@@ -2,7 +2,6 @@ use serde::Serialize;
 use zkwasm_rest_abi::{StorageData, MERKLE_MAP};
 use std::cell::RefCell;
 use crate::market::MarketData;
-use crate::config::DEFAULT_MARKET;
 use crate::error::ERROR_MARKET_NOT_ACTIVE;
 use crate::event::{MarketEvent, EVENT_MARKET_UPDATE};
 use crate::event::insert_event;
@@ -11,12 +10,14 @@ use crate::event::insert_event;
 pub struct QueryState {
     counter: u64,
     total_players: u64,
+    total_markets: u64,
 }
 
 #[derive(Serialize, Clone)]
 pub struct GlobalState {
     pub counter: u64,
-    pub market: MarketData,
+    pub market_ids: Vec<u64>,  // List of active market IDs
+    pub next_market_id: u64,   // Auto-incrementing market ID
     pub total_players: u64,
     pub txsize: u64,
     pub txcounter: u64,
@@ -24,32 +25,26 @@ pub struct GlobalState {
 
 impl GlobalState {
     pub fn new() -> Self {
-        // Create market using config parameters
-        let market = MarketData::new(
-            DEFAULT_MARKET.title.to_string(),
-            DEFAULT_MARKET.description.to_string(),
-            DEFAULT_MARKET.start_time,
-            DEFAULT_MARKET.end_time,
-            DEFAULT_MARKET.resolution_time,
-        ).expect("Failed to create market");
-
         GlobalState {
             counter: 0,
-            market,
+            market_ids: vec![],  // Start with no markets
+            next_market_id: 1,
             total_players: 0,
             txsize: 0,
             txcounter: 0,
         }
     }
 
-    fn emit_market_event(&self) {
-        let market_event = MarketEvent::from(&self.market);
-        let mut data = Vec::with_capacity(3);
-        data.push(self.counter);
-        market_event.to_data(&mut data);
-        insert_event(EVENT_MARKET_UPDATE, &mut data);
+    fn emit_market_event(&self, market_id: u64) {
+        if let Some(market) = MarketManager::get_market(market_id) {
+            let market_event = MarketEvent::from(&market);
+            let mut data = Vec::with_capacity(4);
+            data.push(self.counter);
+            data.push(market_id);
+            market_event.to_data(&mut data);
+            insert_event(EVENT_MARKET_UPDATE, &mut data);
+        }
     }
-
 
     pub fn snapshot() -> String {
         let state = GLOBAL_STATE.0.borrow();
@@ -62,12 +57,16 @@ impl GlobalState {
         serde_json::to_string(&player).unwrap()
     }
 
-    pub fn ensure_active(&self) -> Result <u64, u32> {
+    pub fn ensure_market_active(&self, market_id: u64) -> Result <u64, u32> {
         let current_time = self.counter;
-        if !self.market.is_active(current_time) {
-            return Err(ERROR_MARKET_NOT_ACTIVE);
+        if let Some(market) = MarketManager::get_market(market_id) {
+            if !market.is_active(current_time) {
+                return Err(ERROR_MARKET_NOT_ACTIVE);
+            } else {
+                Ok(current_time)
+            }
         } else {
-            Ok(current_time)
+            Err(ERROR_MARKET_NOT_ACTIVE)
         }
     }
 
@@ -115,12 +114,27 @@ impl GlobalState {
 
 impl StorageData for GlobalState {
     fn from_data(u64data: &mut std::slice::IterMut<u64>) -> Self {
+        let counter = *u64data.next().unwrap();
+        let total_players = *u64data.next().unwrap();
+        let txsize = *u64data.next().unwrap();
+        let txcounter = *u64data.next().unwrap();
+        let next_market_id = *u64data.next().unwrap();
+        let market_count = *u64data.next().unwrap();
+        
+        let mut market_ids = Vec::new();
+        for _ in 0..market_count {
+            if let Some(id) = u64data.next() {
+                market_ids.push(*id);
+            }
+        }
+        
         GlobalState {
-            counter: *u64data.next().unwrap(),
-            total_players: *u64data.next().unwrap(),
-            txsize: *u64data.next().unwrap(),
-            txcounter: *u64data.next().unwrap(),
-            market: MarketData::from_data(u64data),
+            counter,
+            total_players,
+            txsize,
+            txcounter,
+            next_market_id,
+            market_ids,
         }
     }
 
@@ -129,7 +143,9 @@ impl StorageData for GlobalState {
         data.push(self.total_players);
         data.push(self.txsize);
         data.push(self.txcounter);
-        self.market.to_data(data);
+        data.push(self.next_market_id);
+        data.push(self.market_ids.len() as u64);
+        data.extend(self.market_ids.iter().cloned());
     }
 }
 
@@ -150,6 +166,7 @@ const SELL: u64 = 5;
 const RESOLVE: u64 = 6;
 const CLAIM: u64 = 7;
 const WITHDRAW_FEES: u64 = 8;
+const CREATE_MARKET: u64 = 9;
 
 pub struct Transaction {
     command: crate::command::Command,
@@ -180,18 +197,31 @@ impl Transaction {
                 data: [params[1], params[2], params[4]]
             })
         } else if command == BET {
-            enforce(params.len() == 3, "bet needs 3 params");
-            Command::Activity(Activity::Bet(params[1], params[2]))
+            enforce(params.len() == 4, "bet needs 4 params");
+            Command::Activity(Activity::Bet(params[1], params[2], params[3]))
         } else if command == SELL {
-            enforce(params.len() == 3, "sell needs 3 params");
-            Command::Activity(Activity::Sell(params[1], params[2]))
+            enforce(params.len() == 4, "sell needs 4 params");
+            Command::Activity(Activity::Sell(params[1], params[2], params[3]))
         } else if command == RESOLVE {
-            enforce(params.len() == 2, "resolve needs 2 params");
-            Command::Activity(Activity::Resolve(params[1]))
+            enforce(params.len() == 3, "resolve needs 3 params");
+            Command::Activity(Activity::Resolve(params[1], params[2]))
         } else if command == CLAIM {
-            Command::Activity(Activity::Claim)
+            enforce(params.len() == 2, "claim needs 2 params");
+            Command::Activity(Activity::Claim(params[1]))
         } else if command == WITHDRAW_FEES {
-            Command::Activity(Activity::WithdrawFees)
+            enforce(params.len() == 2, "withdraw_fees needs 2 params");
+            Command::Activity(Activity::WithdrawFees(params[1]))
+        } else if command == CREATE_MARKET {
+            enforce(params.len() >= 7, "create_market needs at least 7 params");
+            let title_len = params[1] as usize;
+            enforce(params.len() == 2 + title_len + 5, "create_market param length mismatch");
+            let title_u64_vec = params[2..2+title_len].to_vec();
+            let start_time = params[2+title_len];
+            let end_time = params[2+title_len+1];
+            let resolution_time = params[2+title_len+2];
+            let yes_liquidity = params[2+title_len+3];
+            let no_liquidity = params[2+title_len+4];
+            Command::Activity(Activity::CreateMarket(title_u64_vec, start_time, end_time, resolution_time, yes_liquidity, no_liquidity))
         } else if command == INSTALL_PLAYER {
             Command::InstallPlayer
         } else {
@@ -222,8 +252,14 @@ impl Transaction {
     }
 
     pub fn tick(&self) {
-        GLOBAL_STATE.0.borrow_mut().counter += 1;
-        GLOBAL_STATE.0.borrow().emit_market_event();
+        let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        global_state.counter += 1;
+        // Emit events for all active markets
+        let market_ids = global_state.market_ids.clone();
+        drop(global_state);
+        for market_id in market_ids {
+            GLOBAL_STATE.0.borrow().emit_market_event(market_id);
+        }
     }
 
     pub fn inc_tx_number(&self) {
@@ -252,11 +288,14 @@ impl Transaction {
             crate::command::Command::Withdraw(cmd) => cmd.handle(&pid, self.nonce, rand, counter)
                 .map_or_else(|e| e, |_| 0),
             crate::command::Command::Activity(cmd) => {
-                // Check admin permissions for resolve and withdraw fees commands
-                if let Activity::Resolve(_) = cmd {
+                // Check admin permissions for resolve, withdraw fees, and create market commands
+                if let Activity::Resolve(_, _) = cmd {
                     unsafe { require(*pkey == *ADMIN_PUBKEY) };
                 }
-                if let Activity::WithdrawFees = cmd {
+                if let Activity::WithdrawFees(_) = cmd {
+                    unsafe { require(*pkey == *ADMIN_PUBKEY) };
+                }
+                if let Activity::CreateMarket(_, _, _, _, _, _) = cmd {
                     unsafe { require(*pkey == *ADMIN_PUBKEY) };
                 }
                 cmd.handle(&pid, self.nonce, rand, counter)
@@ -282,5 +321,68 @@ impl Transaction {
             (state.counter << 32) + state.txcounter
         };
         clear_events(vec![e as u64, eventid])
+    }
+}
+
+// Market management system using indexed storage
+pub struct MarketManager;
+
+impl MarketManager {
+    const MARKET_PREFIX: [u64; 2] = [1, 0]; // Prefix for market storage keys
+    
+    pub fn store_market(market_id: u64, market: &MarketData) {
+        let mut data = vec![];
+        market.to_data(&mut data);
+        let kvpair = unsafe { &mut MERKLE_MAP };
+        let key = [Self::MARKET_PREFIX[0], Self::MARKET_PREFIX[1], market_id, 0];
+        kvpair.set(&key, data.as_slice());
+    }
+    
+    pub fn get_market(market_id: u64) -> Option<MarketData> {
+        let kvpair = unsafe { &mut MERKLE_MAP };
+        let key = [Self::MARKET_PREFIX[0], Self::MARKET_PREFIX[1], market_id, 0];
+        let mut data = kvpair.get(&key);
+        if !data.is_empty() {
+            let mut u64data = data.iter_mut();
+            Some(MarketData::from_data(&mut u64data))
+        } else {
+            None
+        }
+    }
+    
+    pub fn update_market(market_id: u64, market: &MarketData) {
+        Self::store_market(market_id, market);
+    }
+
+    pub fn create_market_with_title_u64_and_liquidity(
+        title_u64_vec: Vec<u64>, 
+        description: String, 
+        start_time: u64, 
+        end_time: u64, 
+        resolution_time: u64,
+        initial_yes_liquidity: u64,
+        initial_no_liquidity: u64
+    ) -> Result<u64, u32> {
+        let market = MarketData::new_with_title_u64_and_liquidity(
+            title_u64_vec, 
+            description, 
+            start_time, 
+            end_time, 
+            resolution_time,
+            initial_yes_liquidity,
+            initial_no_liquidity
+        )?;
+        
+        let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        let market_id = global_state.next_market_id;
+        global_state.next_market_id += 1;
+        global_state.market_ids.push(market_id);
+        
+        Self::store_market(market_id, &market);
+        Ok(market_id)
+    }
+
+    pub fn get_active_market_ids() -> Vec<u64> {
+        GLOBAL_STATE.0.borrow().market_ids.clone()
     }
 }
