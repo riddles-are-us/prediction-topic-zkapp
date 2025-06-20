@@ -20,13 +20,7 @@ export function docToJSON(doc: mongoose.Document) {
 export const MARKET_INFO = 1;
 export const LIQUIDITY_HISTORY_INFO = 2;
 
-// 操作类型枚举，提高代码可读性
-export enum ActionType {
-    CREATION = 0,
-    BET = 1,
-    SELL = 2,
-    RESOLUTION = 3
-}
+// ActionType enum removed - no longer needed since liquidity history only tracks snapshots
 
 // 价格计算工具类
 export class PriceCalculator {
@@ -64,7 +58,7 @@ export class IndexedObject {
         } else if (this.index === LIQUIDITY_HISTORY_INFO) {
             return LiquidityHistoryEntry.fromData(this.data);
         } else {
-            console.log("fatal, unexpected object index:", this.index);
+            console.error("Fatal: unexpected object index:", this.index);
             process.exit();
         }
     }
@@ -188,22 +182,18 @@ export class MarketData {
     }
 }
 
-// Liquidity History Entry
+// Liquidity History Entry - simplified to only track liquidity snapshots
 export class LiquidityHistoryEntry {
     marketId: bigint;
     counter: bigint;
     yesLiquidity: bigint;
     noLiquidity: bigint;
-    totalVolume: bigint;
-    actionType: bigint; // 0 = creation, 1 = bet, 2 = sell, 3 = resolution
 
     constructor(data: any) {
         this.marketId = data.marketId;
         this.counter = data.counter;
         this.yesLiquidity = data.yesLiquidity;
         this.noLiquidity = data.noLiquidity;
-        this.totalVolume = data.totalVolume;
-        this.actionType = data.actionType;
     }
 
     static fromData(data: bigint[]): LiquidityHistoryEntry {
@@ -211,9 +201,7 @@ export class LiquidityHistoryEntry {
             marketId: data[0],
             counter: data[1],
             yesLiquidity: data[2],
-            noLiquidity: data[3],
-            totalVolume: data[4],
-            actionType: data[5]
+            noLiquidity: data[3]
         });
     }
 }
@@ -239,14 +227,12 @@ const marketObjectSchema = new mongoose.Schema({
 
 marketObjectSchema.pre('init', ObjectEvent.uint64FetchPlugin);
 
-// Liquidity History Schema
+// Liquidity History Schema - simplified snapshots
 const liquidityHistorySchema = new mongoose.Schema({
     marketId: { type: BigInt, required: true },
     counter: { type: BigInt, required: true },
     yesLiquidity: { type: BigInt, required: true },
     noLiquidity: { type: BigInt, required: true },
-    totalVolume: { type: BigInt, required: true },
-    actionType: { type: BigInt, required: true }, // 0 = creation, 1 = bet, 2 = sell, 3 = resolution
 });
 
 liquidityHistorySchema.pre('init', ObjectEvent.uint64FetchPlugin);

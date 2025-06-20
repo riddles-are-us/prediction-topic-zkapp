@@ -158,7 +158,6 @@ async function main() {
         console.log(`    Counter: ${point.counter}`);
         console.log(`    YES Liquidity: ${point.yesLiquidity}`);
         console.log(`    NO Liquidity: ${point.noLiquidity}`);
-        console.log(`    Action Type: ${point.actionTypeName}`);
         
         // Calculate prices on frontend side
         const yesLiq = BigInt(point.yesLiquidity);

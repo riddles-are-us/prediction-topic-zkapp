@@ -1,8 +1,7 @@
 use crate::error::*;
-use crate::event::{insert_event, EVENT_BET_UPDATE, emit_market_indexed_object, emit_liquidity_history};
+use crate::event::{insert_event, EVENT_BET_UPDATE, emit_market_indexed_object};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
-use crate::market::MarketData;
 
 #[derive(Clone)]
 pub enum Command {
@@ -114,21 +113,8 @@ impl CommandHandler for Activity {
 }
 
 impl Activity {
-    // 统一的市场事件发射函数，减少重复代码
-    fn emit_market_update_events(market: &MarketData, market_id: u64, counter: u64, action_type: u64) {
-        // Emit IndexedObject event for updated market
-        emit_market_indexed_object(market, market_id);
-        
-        // Emit liquidity history
-        emit_liquidity_history(
-            market_id,
-            counter,
-            market.yes_liquidity,
-            market.no_liquidity,
-            market.total_volume,
-            action_type
-        );
-    }
+    // Note: Market IndexedObject events are now emitted directly
+    // Liquidity history is only emitted during Tick (counter increment)
 
     fn handle_bet(player: &mut Player, market_id: u64, bet_type: u64, amount: u64, _counter: u64) -> Result<(), u32> {
         if amount == 0 {
@@ -165,8 +151,8 @@ impl Activity {
         // Emit events
         Self::emit_bet_event(player.player_id, market_id, bet_type, amount, shares, txid, current_time);
         
-        // 使用统一的事件发射函数
-        Self::emit_market_update_events(&market, market_id, current_time, 1);
+        // Emit IndexedObject event for updated market
+        emit_market_indexed_object(&market, market_id);
         
         Ok(())
     }
@@ -210,8 +196,8 @@ impl Activity {
         // Emit events
         Self::emit_sell_event(player.player_id, market_id, sell_type, shares, payout, txid, current_time);
         
-        // 使用统一的事件发射函数
-        Self::emit_market_update_events(&market, market_id, current_time, 2);
+        // Emit IndexedObject event for updated market
+        emit_market_indexed_object(&market, market_id);
 
         Ok(())
     }
@@ -231,8 +217,8 @@ impl Activity {
         market.resolve(outcome_bool)?;
         crate::state::MarketManager::update_market(market_id, &market);
         
-        // 使用统一的事件发射函数
-        Self::emit_market_update_events(&market, market_id, current_time, 3);
+        // Emit IndexedObject event for updated market
+        emit_market_indexed_object(&market, market_id);
         
         Ok(())
     }

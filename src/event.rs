@@ -68,15 +68,13 @@ impl From<&MarketData> for MarketEvent {
     }
 }
 
-// New struct for historical liquidity tracking
+// New struct for historical liquidity tracking - simplified to only track liquidity snapshots
 #[derive(Debug, Clone)]
 pub struct LiquidityHistoryEntry {
     pub market_id: u64,
     pub counter: u64,
     pub yes_liquidity: u64,
     pub no_liquidity: u64,
-    pub total_volume: u64,
-    pub action_type: u64, // 0 = creation, 1 = bet, 2 = sell, 3 = resolution
 }
 
 impl StorageData for LiquidityHistoryEntry {
@@ -86,8 +84,6 @@ impl StorageData for LiquidityHistoryEntry {
             counter: *u64data.next().unwrap(),
             yes_liquidity: *u64data.next().unwrap(),
             no_liquidity: *u64data.next().unwrap(),
-            total_volume: *u64data.next().unwrap(),
-            action_type: *u64data.next().unwrap(),
         }
     }
     fn to_data(&self, data: &mut Vec<u64>) {
@@ -95,8 +91,6 @@ impl StorageData for LiquidityHistoryEntry {
         data.push(self.counter);
         data.push(self.yes_liquidity);
         data.push(self.no_liquidity);
-        data.push(self.total_volume);
-        data.push(self.action_type);
     }
 }
 
@@ -118,15 +112,13 @@ pub fn emit_market_indexed_object(market: &MarketData, market_id: u64) {
     insert_event(EVENT_INDEXED_OBJECT, &mut data);
 }
 
-// Helper function to emit liquidity history
-pub fn emit_liquidity_history(market_id: u64, counter: u64, yes_liquidity: u64, no_liquidity: u64, total_volume: u64, action_type: u64) {
+// Helper function to emit liquidity history - simplified to only track liquidity snapshots
+pub fn emit_liquidity_history(market_id: u64, counter: u64, yes_liquidity: u64, no_liquidity: u64) {
     let history_entry = LiquidityHistoryEntry {
         market_id,
         counter,
         yes_liquidity,
         no_liquidity,
-        total_volume,
-        action_type,
     };
     
     let mut data = Vec::new();

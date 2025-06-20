@@ -165,9 +165,6 @@ export interface LiquidityHistoryData {
     counter: string;
     yesLiquidity: string;
     noLiquidity: string;
-    totalVolume: string;
-    actionType: string;
-    actionTypeName: string;
 }
 
 export interface PlayerMarketPosition {

@@ -250,11 +250,24 @@ impl Transaction {
     pub fn tick(&self) {
         let mut global_state = GLOBAL_STATE.0.borrow_mut();
         global_state.counter += 1;
-        // Emit events for all active markets
+        let new_counter = global_state.counter;
+        // Get all active market IDs
         let market_ids = global_state.market_ids.clone();
         drop(global_state);
+        
+        // Emit events for all active markets
         for market_id in market_ids {
             GLOBAL_STATE.0.borrow().emit_market_event(market_id);
+            
+            // Emit liquidity history for each market at this counter
+            if let Some(market) = MarketManager::get_market(market_id) {
+                emit_liquidity_history(
+                    market_id,
+                    new_counter,
+                    market.yes_liquidity,
+                    market.no_liquidity
+                );
+            }
         }
     }
 
@@ -386,9 +399,7 @@ impl MarketManager {
             market_id, 
             timestamp, 
             initial_yes_liquidity, 
-            initial_no_liquidity, 
-            0, // initial volume is 0
-            0  // action_type: 0 = creation
+            initial_no_liquidity
         );
         
         Ok(market_id)

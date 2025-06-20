@@ -114,19 +114,19 @@ export class AMMPriceCalculator {
      * 格式化显示结果
      */
     static formatResults(results: PriceCalculationResult[]): string {
-        let output = "\n=== AMM价格推动计算结果 ===\n";
-        output += "初始状态: YES=1,000,000, NO=1,000,000, 当前价格=50%\n\n";
+        let output = "\n=== AMM Price Movement Calculation Results ===\n";
+        output += "Initial State: YES=1,000,000, NO=1,000,000, Current Price=50%\n\n";
         
         results.forEach((result, index) => {
             const targetPercent = (result.targetPrice * 100).toFixed(0);
             const actualPercent = (result.actualPrice * 100).toFixed(1);
             
-            output += `📊 推动到 ${targetPercent}%:\n`;
-            output += `   需要投注: ${result.requiredBetAmount.toLocaleString()} 代币\n`;
-            output += `   净投注额: ${result.netBetAmount.toLocaleString()} 代币\n`;
-            output += `   手续费: ${result.fee.toLocaleString()} 代币\n`;
-            output += `   新流动性: YES=${result.newYesLiquidity.toLocaleString()}, NO=${result.newNoLiquidity.toLocaleString()}\n`;
-            output += `   实际价格: ${actualPercent}%\n\n`;
+            output += `Target ${targetPercent}%:\n`;
+            output += `   Required Bet: ${result.requiredBetAmount.toLocaleString()} tokens\n`;
+            output += `   Net Bet Amount: ${result.netBetAmount.toLocaleString()} tokens\n`;
+            output += `   Fee: ${result.fee.toLocaleString()} tokens\n`;
+            output += `   New Liquidity: YES=${result.newYesLiquidity.toLocaleString()}, NO=${result.newNoLiquidity.toLocaleString()}\n`;
+            output += `   Actual Price: ${actualPercent}%\n\n`;
         });
 
         return output;
@@ -162,11 +162,11 @@ export class AMMPriceCalculator {
 
 // 执行计算并输出结果
 export function calculatePriceTargets() {
-    console.log("=== 单独投注效果（从初始状态50%开始） ===");
+    console.log("=== Individual Bet Effects (starting from 50%) ===");
     const individualResults = AMMPriceCalculator.calculateMultipleTargets();
     console.log(AMMPriceCalculator.formatResults(individualResults));
 
-    console.log("=== 累积投注效果（连续推动价格） ===");
+    console.log("=== Cumulative Bet Effects (consecutive price movements) ===");
     const { cumulative } = AMMPriceCalculator.calculateCumulativeEffect([0.6, 0.7, 0.8, 0.9]);
     
     let totalInvestment = 0n;
@@ -178,10 +178,10 @@ export function calculatePriceTargets() {
         
         totalInvestment += result.requiredBetAmount;
         
-        console.log(`📈 从 ${fromPercent}% 推动到 ${targetPercent}%:`);
-        console.log(`   本次投注: ${result.requiredBetAmount.toLocaleString()} 代币`);
-        console.log(`   累计投注: ${totalInvestment.toLocaleString()} 代币`);
-        console.log(`   新流动性: YES=${result.newYesLiquidity.toLocaleString()}, NO=${result.newNoLiquidity.toLocaleString()}\n`);
+        console.log(`Moving from ${fromPercent}% to ${targetPercent}%:`);
+        console.log(`   This bet: ${result.requiredBetAmount.toLocaleString()} tokens`);
+        console.log(`   Total invested: ${totalInvestment.toLocaleString()} tokens`);
+        console.log(`   New liquidity: YES=${result.newYesLiquidity.toLocaleString()}, NO=${result.newNoLiquidity.toLocaleString()}\n`);
         
         currentPrice = result.actualPrice * 100;
     });
