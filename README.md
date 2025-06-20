@@ -1,250 +1,416 @@
-# Prediction Market
+# Prediction Market - Multi-Market zkWasm Application
 
-A simple zkWasm-based prediction market application focused on single-topic predictions.
+A comprehensive zkWasm-based prediction market platform supporting multiple markets with advanced AMM algorithms, real-time event tracking, and IndexedObject pattern implementation.
 
-## Features
+## 🚀 Features
 
-- **Single Prediction Market**: Focused on one prediction topic - "Will Bitcoin reach $100,000 by the end of 2024?"
-- **AMM Algorithm**: Uses Automated Market Maker algorithm for price discovery and liquidity management
-- **Buy/Sell Operations**: Users can buy and sell Yes/No shares with continuous liquidity
-- **Real-time Pricing**: Advanced price calculation functions for buy/sell operations
+### Core Market Functions
+- **Multi-Market Support**: Create and manage multiple prediction markets simultaneously
+- **Dynamic Market Creation**: Admin can create markets with custom titles, timeframes, and initial liquidity
+- **AMM Algorithm**: Automated Market Maker using constant product formula (x * y = k)
+- **Real-time Pricing**: Continuous price discovery based on liquidity ratios
+- **Buy/Sell Operations**: Users can trade YES/NO shares with immediate execution
+- **Market Resolution**: Admin-controlled market outcomes with automatic payout calculations
+
+### Advanced Features
+- **IndexedObject Pattern**: Modern data storage and event system for efficient querying
+- **Liquidity History Tracking**: Historical snapshots of market liquidity at each counter
 - **Market Impact Analysis**: Calculate slippage and price impact before trading
-- **Fee Management**: Platform collects 1% fee on all transactions, admin can withdraw collected fees
-- **Time Management**: Set market start, end, and resolution times
-- **Automatic Settlement**: Users can claim rewards after market resolution
-- **Deposit/Withdraw**: Admins can deposit funds for players, players can withdraw funds
-- **Event System**: Real-time event notifications and state synchronization
-- **Robust Error Handling**: Graceful error handling for edge cases like NoWinningPosition
+- **Transaction History**: Complete transaction logs per player and market
+- **Position Management**: Track player positions across multiple markets
+- **Fee Management**: 1% platform fee collection with admin withdrawal
 
-## Technical Architecture
+### Security & Safety
+- **Mathematical Safety**: Comprehensive overflow/underflow protection
+- **Input Validation**: Strict validation of all parameters and amounts
+- **Error Handling**: Graceful error handling with detailed error codes
+- **Access Control**: Role-based permissions for admin vs player operations
 
-### Rust Backend (src/)
-- `lib.rs`: Application entry point, creates zkwasm API
-- `config.rs`: Configuration and constant definitions
-- `error.rs`: Error code definitions
-- `event.rs`: Event system implementation
-- `command.rs`: Command structures and processing logic
-- `player.rs`: Player data structures and operations
-- `market.rs`: Prediction market core logic and AMM algorithm
-- `settlement.rs`: Withdrawal settlement system
-- `state.rs`: Global state management and transaction processing
+## 🏗️ Technical Architecture
 
-### TypeScript Server (ts/)
-- `src/service.ts`: Main service file, handles events and API
-- `src/models.ts`: Data models and MongoDB integration
-- `src/api.ts`: API client and transaction building tools
-- `src/test.ts`: Test scripts
-
-## AMM Algorithm
-
-Uses constant product formula (x * y = k) for automated market making:
-- Initial liquidity: Yes = 1,000,000, No = 1,000,000
-- Price calculation: Yes price = No liquidity / (Yes liquidity + No liquidity)
-- Buy/sell operations: Continuous liquidity with automatic price adjustment
-- Platform fee: 1% on all transactions
-
-> 📊 For detailed calculation examples with specific numbers, see [AMM_CALCULATION_EXAMPLES.md](AMM_CALCULATION_EXAMPLES.md)
-> 
-> 🔢 For precision constants and calculation accuracy, see [PRECISION_CONSTANTS.md](PRECISION_CONSTANTS.md)
-
-## Data Access
-
-All data is now accessed directly via RPC queries to the state:
-
-- **Player State**: `rpc.queryState(playerKey)` - Returns unified player data including market information
-- **Market Data**: Included in player state response under `state.market`
-
-### Data Structure
-```typescript
-// Player state response
-{
-  player: {
-    player_id: [u64, u64],
-    data: {
-      balance: string,
-      yes_shares: string, 
-      no_shares: string,
-      claimed: boolean,
-      nonce: string
-    }
-  },
-  state: {
-    market: {
-      title: string,
-      yes_liquidity: string,
-      no_liquidity: string,
-      total_volume: string,
-      resolved: boolean,
-      outcome: boolean,
-      total_fees_collected: string
-    }
-  }
-}
+### Rust Backend (`src/`)
+```
+├── lib.rs                 # Application entry point and zkWasm API
+├── config.rs              # Configuration constants and settings
+├── error.rs               # Error code definitions and handling
+├── event.rs               # IndexedObject event system implementation
+├── command.rs             # Transaction command processing
+├── player.rs              # Player data structures and operations
+├── market.rs              # Market logic and AMM algorithms
+├── math_safe.rs           # Safe mathematical operations
+├── settlement.rs          # Withdrawal settlement system
+├── state.rs               # Global state and market management
+└── security_tests.rs      # Comprehensive security test suite
 ```
 
-## Transaction Commands
+### TypeScript Frontend (`ts/src/`)
+```
+├── service.ts             # Main service with REST API endpoints
+├── models.ts              # Data models and MongoDB schemas
+├── api.ts                 # Client API and transaction builders
+├── test_query.ts          # Comprehensive API testing
+└── test_user.ts           # User interaction testing
+```
 
-| Command ID | Command Name | Parameters | Permission |
-|------------|--------------|------------|------------|
-| 0 | TICK | None | Admin |
-| 1 | INSTALL_PLAYER | None | Any user |
-| 2 | WITHDRAW | amount, address_high, address_low | Player |
-| 3 | DEPOSIT | target_pid1, target_pid2, token_index, amount | Admin |
-| 4 | BET | bet_type (0=NO, 1=YES), amount | Player |
-| 5 | SELL | sell_type (0=NO, 1=YES), shares | Player |
-| 6 | RESOLVE | outcome (0=NO, 1=YES) | Admin |
-| 7 | CLAIM | None | Player |
-| 8 | WITHDRAW_FEES | None | Admin |
+## 📊 AMM Algorithm
 
-## Event Types
+### Constant Product Formula
+- **Formula**: `x * y = k` (where x = YES liquidity, y = NO liquidity)
+- **Price Calculation**: 
+  - YES Price = `NO_liquidity / (YES_liquidity + NO_liquidity)`
+  - NO Price = `YES_liquidity / (YES_liquidity + NO_liquidity)`
+- **Fee Structure**: 1% platform fee on all transactions (向上取整)
+- **Liquidity Impact**: Continuous price adjustment based on trading volume
 
-| Event ID | Event Name | Data |
-|----------|------------|------|
-| 1 | PLAYER_UPDATE | pid1, pid2, balance, yes_shares, no_shares, claimed |
-| 2 | MARKET_UPDATE | yes_liquidity, no_liquidity, total_volume, resolved, outcome, fees |
-| 3 | BET_UPDATE | pid1, pid2, bet_type, amount, shares |
+### Example Calculation
+```typescript
+// Initial state: YES = 1,000,000, NO = 1,000,000
+// Current prices: YES = 50%, NO = 50%
 
-## Transaction Building Tools
+// User bets 10,000 on YES
+// Fee: 100 (1% of 10,000, rounded up)
+// Net amount: 9,900
+// New liquidity: YES = 910,083, NO = 1,009,900
+// New prices: YES ≈ 52.6%, NO ≈ 47.4%
+```
 
-TypeScript API provides convenient transaction building functions:
+## 🔌 API Endpoints
 
+### Market Data
+- `GET /data/markets` - Get all markets
+- `GET /data/market/:marketId` - Get specific market details
+- `GET /data/market/:marketId/liquidity` - Get market liquidity history
+
+### Transactions
+- `GET /data/market/:marketId/recent` - Recent transactions for market
+- `GET /data/player/:pid1/:pid2/recent` - Player's recent transactions (all markets)
+- `GET /data/player/:pid1/:pid2/market/:marketId/recent` - Player's transactions for specific market
+
+### Player Data
+- `GET /data/player/:pid1/:pid2/market/:marketId` - Player's position in specific market
+- `GET /data/player/:pid1/:pid2/positions` - Player's positions across all markets
+
+## 🎮 Transaction Commands
+
+| Command ID | Command | Parameters | Permission | Description |
+|------------|---------|------------|------------|-------------|
+| 0 | TICK | - | Admin | Increment global counter (every 5s) and emit liquidity snapshots |
+| 1 | INSTALL_PLAYER | - | Any | Register new player |
+| 2 | WITHDRAW | amount, addr_high, addr_low | Player | Withdraw funds to external address |
+| 3 | DEPOSIT | target_pid1, target_pid2, amount | Admin | Deposit funds for player |
+| 4 | BET | market_id, bet_type (0=NO, 1=YES), amount | Player | Place bet on market |
+| 5 | SELL | market_id, sell_type (0=NO, 1=YES), shares | Player | Sell shares |
+| 6 | RESOLVE | market_id, outcome (0=NO, 1=YES) | Admin | Resolve market outcome |
+| 7 | CLAIM | market_id | Player | Claim winnings from resolved market |
+| 8 | WITHDRAW_FEES | market_id | Admin | Withdraw collected fees |
+| 9 | CREATE_MARKET | title, time_offsets, liquidity | Admin | Create new market with relative timing |
+
+## 📡 Event System (IndexedObject Pattern)
+
+### Event Types
+- **EVENT_BET_UPDATE (3)**: Transaction events for bets and sells
+- **EVENT_INDEXED_OBJECT (4)**: Market data and liquidity history updates
+
+### IndexedObject Data
+- **MARKET_INFO (1)**: Complete market state with all parameters
+- **LIQUIDITY_HISTORY_INFO (2)**: Liquidity snapshots (YES/NO liquidity only)
+
+### Event Emission Strategy
+- **Market Updates**: Emitted on every market operation (bet, sell, resolve)
+- **Liquidity History**: Emitted only on TICK (every 5 seconds) to avoid duplicates
+- **Transaction Events**: Emitted for every bet/sell operation
+
+### Timing Details
+- **Counter Increment**: Every 5 seconds via TICK command
+- **Liquidity Snapshots**: One per counter (every 5 seconds) for each active market
+- **Market Operations**: Can happen multiple times within a single counter period
+
+## 💻 Usage Examples
+
+### Initialize Client
 ```typescript
 import { Player, PredictionMarketAPI } from './api.js';
 import { ZKWasmAppRpc } from 'zkwasm-minirollup-rpc';
 
-// Initialize RPC and Player
 const rpc = new ZKWasmAppRpc("http://localhost:3000");
-const player = new Player("player_private_key", rpc);
+const player = new Player("your_private_key", rpc);
 const api = new PredictionMarketAPI();
 
-// Get player and market data
-const playerData = await rpc.queryState(player.processingKey);
-const parsedData = JSON.parse(playerData.data);
-const marketInfo = parsedData.state.market;
-const playerInfo = parsedData.player.data;
-
-// Price calculations using market data
-const yesLiquidity = BigInt(marketInfo.yes_liquidity);
-const noLiquidity = BigInt(marketInfo.no_liquidity);
-
-// Get current market prices
-const prices = api.calculatePrices(yesLiquidity, noLiquidity);
-console.log(`Current prices: YES=${prices.yesPrice}, NO=${prices.noPrice}`);
-
-// Get effective buy/sell prices
-const buyPrice = api.getBuyPrice(1, 1000, yesLiquidity, noLiquidity);
-const sellPrice = api.getSellPrice(1, 1000, yesLiquidity, noLiquidity);
-console.log(`YES buy price: ${buyPrice}, sell price: ${sellPrice}`);
-
-// Analyze market impact
-const impact = api.calculateMarketImpact(1, 10000, yesLiquidity, noLiquidity);
-const slippage = api.calculateSlippage(1, 10000, yesLiquidity, noLiquidity);
-
-// Transaction examples
-await player.placeBet(1, 1000n); // YES bet, 1000 units
-await player.sellShares(1, 500n); // Sell 500 YES shares
-await player.claimWinnings(); // Claim rewards
-await player.withdrawFunds(1000n, 0n, 0n); // Withdraw funds
-
-// Admin operations (requires admin key)
-const admin = new Player("admin_private_key", rpc);
-await admin.depositFunds(1000n, targetPid1, targetPid2); // Deposit for player
-await admin.resolveMarket(true); // Resolve market (YES outcome)
-await admin.withdrawFees(); // Withdraw collected fees
+// Install player (first time)
+await player.installPlayer();
 ```
 
-## Build and Run
+### Market Operations
+```typescript
+// Get all markets
+const markets = await api.getAllMarkets();
+console.log(`Found ${markets.length} markets`);
 
+// Get specific market
+const market = await api.getMarket("0");
+console.log(`Market: ${market.titleString}`);
+console.log(`YES: ${market.yesLiquidity}, NO: ${market.noLiquidity}`);
+
+// Calculate current prices
+const yesLiq = BigInt(market.yesLiquidity);
+const noLiq = BigInt(market.noLiquidity);
+const prices = api.calculatePrices(yesLiq, noLiq);
+console.log(`Prices - YES: ${(prices.yesPrice * 100).toFixed(2)}%, NO: ${(prices.noPrice * 100).toFixed(2)}%`);
+```
+
+### Trading Operations
+```typescript
+// Place bet
+await player.placeBet(0n, 1, 10000n); // Market 0, YES, 10,000 units
+
+// Calculate expected shares
+const expectedShares = api.calculateShares(1, 10000, yesLiq, noLiq);
+console.log(`Expected shares: ${expectedShares}`);
+
+// Sell shares
+await player.sellShares(0n, 1, 5000n); // Market 0, YES, 5,000 shares
+
+// Calculate sell value
+const sellValue = api.calculateSellValue(1, 5000, yesLiq, noLiq);
+console.log(`Sell value: ${sellValue}`);
+```
+
+### Market Analysis
+```typescript
+// Market impact analysis
+const impact = api.calculateMarketImpact(1, 50000, yesLiq, noLiq);
+console.log(`Price impact: ${(impact.currentYesPrice * 100).toFixed(2)}% → ${(impact.newYesPrice * 100).toFixed(2)}%`);
+
+// Slippage calculation
+const slippage = api.calculateSlippage(1, 50000, yesLiq, noLiq);
+console.log(`Slippage: ${slippage.toFixed(4)}%`);
+
+// Get liquidity history
+const history = await api.getMarketLiquidityHistory("0");
+console.log(`Liquidity data points: ${history.length}`);
+```
+
+### Admin Operations
+```typescript
+const admin = new Player("admin_private_key", rpc);
+
+// Create new market with relative time offsets
+await admin.createMarket(
+    "Will Ethereum reach $5000 in 2024?",
+    0n,      // Start immediately (0 ticks offset = 0 seconds)
+    17280n,  // End in 1 day (17280 ticks * 5s = 86400s = 1 day)
+    17400n,  // Resolution 10 minutes after end (17400 ticks * 5s = 87000s)
+    1000000n, // 1M YES liquidity
+    1000000n  // 1M NO liquidity
+);
+
+// Time calculation examples:
+// - 1 minute = 12 ticks (12 * 5s = 60s)
+// - 1 hour = 720 ticks (720 * 5s = 3600s)
+// - 1 day = 17280 ticks (17280 * 5s = 86400s)
+// All times are RELATIVE offsets from market creation time
+
+// Resolve market
+await admin.resolveMarket(1n, true); // Market 1, YES outcome
+
+// Withdraw fees
+await admin.withdrawFees(1n); // From market 1
+```
+
+### Player Data
+```typescript
+// Get player positions
+const pubkey = [0n, 123n, 456n, 0n]; // Player's public key
+const positions = await api.getPlayerAllPositions(
+    pubkey[1].toString(), 
+    pubkey[2].toString()
+);
+
+positions.forEach(pos => {
+    console.log(`Market ${pos.marketId}: YES=${pos.yesShares}, NO=${pos.noShares}`);
+});
+
+// Get transaction history
+const transactions = await api.getPlayerRecentTransactions(
+    pubkey[1].toString(), 
+    pubkey[2].toString()
+);
+
+transactions.forEach(tx => {
+    console.log(`${tx.transactionType}: ${tx.amount} → ${tx.shares} shares`);
+});
+```
+
+## 🔧 Build and Run
+
+### Prerequisites
+- Rust (latest stable)
+- Node.js 18+
+- MongoDB (for data persistence)
+
+### Build Rust Backend
 ```bash
-# Build Rust code
+# Build the zkWasm application
 make build
 
-# Run TypeScript service
+# Run security tests
+cargo test security_tests
+
+# Run all tests
+cargo test
+```
+
+### Setup TypeScript Service
+```bash
 cd ts
+
+# Install dependencies
 npm install
+
+# Build TypeScript
 npm run build
-npm start
 
-# Clean
-make clean
+# Start the service
+node dist/service.js
 ```
 
-## Project Features
+### Testing
+```bash
+# Run comprehensive API tests
+node dist/test_query.js
 
-- **Standardized Architecture**: Follows zkwasm project best practices with unified player state structure
-- **Simplified Deposit/Withdraw**: Uses standard Withdraw/Deposit command structures with proper token indexing
-- **Event-Driven**: Complete event system supports real-time updates
-- **Type Safety**: TypeScript interfaces ensure type safety
-- **Easy Maintenance**: Modular design with separation of concerns
-- **Complete Functionality**: Includes betting, selling, AMM pricing, deposit/withdraw, market resolution, reward claiming, and fee collection
-- **Comprehensive Testing**: Multi-player testing with detailed state logging and error handling
-- **Fee Management**: Platform fee collection (1%) with admin withdrawal capability
+# Run user interaction tests  
+node dist/test_user.js
+```
 
-## Market Lifecycle
+## ⚙️ Configuration
 
-1. **Initialization**: Automatically create preset market when system starts (counter = 0)
-2. **Funding Phase**: Admin deposits funds for players
-3. **Active Period**: Users can purchase and sell Yes/No shares
-4. **End Period**: Stop accepting new bets
-5. **Resolution Period**: Admin sets final result
-6. **Claiming Period**: Winning users claim rewards
-7. **Fee Collection**: Admin withdraws collected platform fees
-8. **Withdrawal Period**: Users can withdraw remaining funds
-
-## Configuration System
-
-### Market Configuration (src/config.rs)
-
-You can customize default market parameters in `config.rs`:
-
+### Market Parameters (src/config.rs)
 ```rust
-pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
-    title: "Bitcoin $100K by 2024",
-    description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
-    start_time: 0,      // Start immediately
-    end_time: TICKS_PER_4_MONTHS,    // End after 4 months (120 days)
-    resolution_time: TICKS_PER_4_MONTHS, // Resolution time (4 months)
-    initial_yes_liquidity: 100000, // Initial YES liquidity for AMM (small liquidity)
-    initial_no_liquidity: 100000,  // Initial NO liquidity for AMM (small liquidity)
-};
+pub const PLATFORM_FEE_RATE: u64 = 100;        // 1% (100/10000)
+pub const FEE_BASIS_POINTS: u64 = 10000;       // Basis points denominator
+pub const NEW_PLAYER_INITIAL_BALANCE: u64 = 1000000; // Starting balance
+pub const ADMIN_PUBKEY: [u64; 4] = [...];      // Admin public key
 ```
 
-> 📖 For detailed configuration examples, see [config_examples.md](config_examples.md)
-
-### Time System
-
-- **Time Unit**: Based on counter value, each tick = 5 seconds
-- **Time Conversion Constants**:
-  - `TICKS_PER_MINUTE = 12`
-  - `TICKS_PER_HOUR = 720`
-  - `TICKS_PER_DAY = 17280`
-  - `TICKS_PER_4_MONTHS = 2073600`
-
-### Time Configuration Examples
-
+### Timing Configuration
 ```rust
-// 1-hour market
-end_time: TICKS_PER_HOUR,
+// Each counter tick represents 5 seconds
+pub const SECONDS_PER_TICK: u64 = 5;
+pub const TICKS_PER_MINUTE: u64 = 12;          // 60s / 5s = 12
+pub const TICKS_PER_HOUR: u64 = 720;           // 3600s / 5s = 720  
+pub const TICKS_PER_DAY: u64 = 17280;          // 86400s / 5s = 17280
 
-// 12-hour market  
-end_time: TICKS_PER_HOUR * 12,
-
-// 3-day market
-end_time: TICKS_PER_DAY * 3,
-
-// Custom time (30 minutes)
-end_time: DefaultMarketConfig::seconds_to_ticks(1800),
+// Market timing examples (all are relative offsets from creation time)
+// - Start immediately: 0
+// - End in 1 hour: 720
+// - End in 1 day: 17280
+// - Resolution 2 hours after end: end_offset + 1440
 ```
 
-## Error Codes
+### Environment Variables
+```bash
+# API service
+API_BASE_URL=http://localhost:3000
 
-| Error Code | Error Name | Description |
-|------------|------------|-------------|
-| ERROR_INVALID_BET_AMOUNT | InvalidBetAmount | Invalid bet amount |
-| ERROR_MARKET_NOT_ACTIVE | MarketNotActive | Market is not active |
-| ERROR_MARKET_NOT_RESOLVED | MarketNotResolved | Market is not resolved |
-| ERROR_INSUFFICIENT_BALANCE | InsufficientBalance | Insufficient balance |
-| ERROR_ALREADY_CLAIMED | AlreadyClaimed | Rewards already claimed |
-| ERROR_PLAYER_NOT_EXIST | PlayerNotExist | Player does not exist |
+# Database
+MONGODB_URI=mongodb://localhost:27017/prediction-market
 
-After market resolution, the application completes its lifecycle. 
+# zkWasm RPC
+ZKWASM_RPC_URL=http://localhost:3000
+```
+
+## 🔒 Security Features
+
+### Mathematical Safety
+- **Overflow Protection**: All arithmetic operations use safe math functions
+- **Underflow Protection**: Prevents negative values in calculations
+- **Division by Zero**: Graceful handling of edge cases
+- **Precision Maintenance**: High-precision calculations for accurate pricing
+
+### Input Validation
+- **Amount Limits**: Configurable maximum bet amounts and shares
+- **Liquidity Bounds**: Minimum and maximum liquidity constraints  
+- **Parameter Validation**: Strict validation of all transaction parameters
+- **Access Control**: Role-based permissions for sensitive operations
+
+### Error Handling
+- **Graceful Degradation**: Continues operation when possible
+- **Detailed Error Codes**: Specific error messages for debugging
+- **Transaction Safety**: Atomic operations with rollback capability
+- **State Consistency**: Ensures data integrity across operations
+
+## 📈 Data Models
+
+### Market Data
+```typescript
+interface MarketData {
+    marketId: string;
+    title: string;
+    titleString?: string;         // Human-readable title
+    description: string;
+    startTime: string;
+    endTime: string;
+    resolutionTime: string;
+    yesLiquidity: string;         // AMM liquidity
+    noLiquidity: string;          // AMM liquidity
+    prizePool: string;            // Real user funds for payouts
+    totalVolume: string;          // Cumulative trading volume
+    totalYesShares: string;       // Total YES shares issued
+    totalNoShares: string;        // Total NO shares issued
+    resolved: boolean;
+    outcome: boolean | null;
+    totalFeesCollected: string;
+}
+```
+
+### Liquidity History (Simplified)
+```typescript
+interface LiquidityHistoryData {
+    marketId: string;
+    counter: string;              // Global counter when recorded
+    yesLiquidity: string;         // YES liquidity snapshot
+    noLiquidity: string;          // NO liquidity snapshot
+    // Note: total_volume can be retrieved from MarketData
+    // Note: action_type removed as history only records counter snapshots
+}
+```
+
+### Player Position
+```typescript
+interface PlayerMarketPosition {
+    pid: string[];                // [pid1, pid2]
+    marketId: string;
+    yesShares: string;
+    noShares: string;
+    claimed: boolean;             // Whether winnings were claimed
+}
+```
+
+## 🎯 Project Status
+
+### Current Version: v2.0 (IndexedObject Pattern)
+- ✅ Multi-market support
+- ✅ IndexedObject event system  
+- ✅ Simplified liquidity history
+- ✅ Comprehensive API endpoints
+- ✅ Security test suite
+- ✅ Mathematical safety features
+- ✅ Real-time event tracking
+- ✅ MongoDB data persistence
+
+### Recent Improvements
+- **Simplified Liquidity History**: Removed redundant fields (action_type, total_volume)
+- **Optimized Event Emission**: Liquidity history only emitted on counter increments (every 5s)
+- **Enhanced API**: Comprehensive REST endpoints for all data access
+- **Code Cleanup**: Removed unnecessary wrapper functions and duplicate code
+- **Improved Testing**: Enhanced test coverage with realistic scenarios
+- **Clarified Timing System**: All market times use relative offsets (ticks) from creation time
+
+## 📝 License
+
+This project is part of the zkWasm ecosystem and follows the applicable licensing terms.
+
+---
+
+For detailed implementation examples and advanced usage patterns, see the test files in `ts/src/test_*.ts`. 
