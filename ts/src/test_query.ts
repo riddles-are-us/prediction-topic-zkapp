@@ -2,7 +2,7 @@ import { Player, PredictionMarketAPI } from "./api.js";
 //import { LeHexBN, ZKWasmAppRpc} from "zkwasm-minirollup-rpc";
 import { LeHexBN, query, ZKWasmAppRpc } from "zkwasm-ts-server";
 
-let account = "1234";
+let account = "456789789";
 
 const rpc: any = new ZKWasmAppRpc("http://127.0.0.1:3000");
 let player = new Player(account, rpc);
@@ -27,10 +27,15 @@ async function main() {
     markets.forEach((market, index) => {
       console.log(`  Market ${index + 1}:`);
       console.log(`    ID: ${market.marketId}`);
-      console.log(`    Title: ${market.title}`);
+      console.log(`    Title: ${market.titleString || 'No title'}`);
       console.log(`    YES Liquidity: ${market.yesLiquidity}`);
       console.log(`    NO Liquidity: ${market.noLiquidity}`);
+      console.log(`    Prize Pool: ${market.prizePool}`);
+      console.log(`    Total Volume: ${market.totalVolume}`);
       console.log(`    Resolved: ${market.resolved}`);
+      if (market.resolved) {
+        console.log(`    Outcome: ${market.outcome ? 'YES' : 'NO'}`);
+      }
     });
     await delay(1000);
 
@@ -45,11 +50,15 @@ async function main() {
     const marketDetails = await api.getMarket(firstMarketId);
     console.log("Market details:", {
       id: marketDetails.marketId,
-      title: marketDetails.title,
+      title: marketDetails.titleString || 'No title',
       yesLiquidity: marketDetails.yesLiquidity,
       noLiquidity: marketDetails.noLiquidity,
+      prizePool: marketDetails.prizePool,
       totalVolume: marketDetails.totalVolume,
-      resolved: marketDetails.resolved
+      totalYesShares: marketDetails.totalYesShares,
+      totalNoShares: marketDetails.totalNoShares,
+      resolved: marketDetails.resolved,
+      outcome: marketDetails.outcome
     });
     await delay(1000);
 
@@ -72,8 +81,8 @@ async function main() {
     // Test 4: Get player recent transactions across all markets
     console.log(`\n4. Fetching player recent transactions across all markets...`);
     const playerTransactions = await api.getPlayerRecentTransactions(
-      pubkey[0].toString(), 
-      pubkey[1].toString()
+      pubkey[1].toString(), 
+      pubkey[2].toString()
     );
     console.log(`Player has made ${playerTransactions.length} recent transactions across all markets`);
     if (playerTransactions.length > 0) {
@@ -91,8 +100,8 @@ async function main() {
     // Test 5: Get player recent transactions for specific market
     console.log(`\n5. Fetching player recent transactions for market ${firstMarketId}...`);
     const playerMarketTransactions = await api.getPlayerMarketRecentTransactions(
-      pubkey[0].toString(), 
-      pubkey[1].toString(),
+      pubkey[1].toString(), 
+      pubkey[2].toString(),
       firstMarketId
     );
     console.log(`Player has made ${playerMarketTransactions.length} recent transactions in this market`);
@@ -110,8 +119,8 @@ async function main() {
     // Test 6: Get player market position
     console.log(`\n6. Fetching player position in market ${firstMarketId}...`);
     const playerPosition = await api.getPlayerMarketPosition(
-      pubkey[0].toString(), 
-      pubkey[1].toString(),
+      pubkey[1].toString(), 
+      pubkey[2].toString(),
       firstMarketId
     );
     console.log("Player market position:", {
@@ -125,8 +134,8 @@ async function main() {
     // Test 7: Get all player positions
     console.log(`\n7. Fetching all player positions...`);
     const allPositions = await api.getPlayerAllPositions(
-      pubkey[0].toString(), 
-      pubkey[1].toString()
+      pubkey[1].toString(), 
+      pubkey[2].toString()
     );
     console.log(`Player has positions in ${allPositions.length} markets:`);
     allPositions.forEach((position, index) => {
@@ -149,6 +158,7 @@ async function main() {
         console.log(`    Counter: ${point.counter}`);
         console.log(`    YES Liquidity: ${point.yesLiquidity}`);
         console.log(`    NO Liquidity: ${point.noLiquidity}`);
+        console.log(`    Action Type: ${point.actionTypeName}`);
         
         // Calculate prices on frontend side
         const yesLiq = BigInt(point.yesLiquidity);

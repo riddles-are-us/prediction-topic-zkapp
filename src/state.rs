@@ -3,8 +3,8 @@ use zkwasm_rest_abi::{StorageData, MERKLE_MAP};
 use std::cell::RefCell;
 use crate::market::MarketData;
 use crate::error::ERROR_MARKET_NOT_ACTIVE;
-use crate::event::{MarketEvent, EVENT_MARKET_UPDATE};
-use crate::event::insert_event;
+use crate::event::{emit_market_indexed_object, emit_liquidity_history};
+
 
 #[derive(Serialize)]
 pub struct QueryState {
@@ -35,14 +35,10 @@ impl GlobalState {
         }
     }
 
-    fn emit_market_event(&self, market_id: u64) {
+    pub fn emit_market_event(&self, market_id: u64) {
         if let Some(market) = MarketManager::get_market(market_id) {
-            let market_event = MarketEvent::from(&market);
-            let mut data = Vec::with_capacity(4);
-            data.push(self.counter);
-            data.push(market_id);
-            market_event.to_data(&mut data);
-            insert_event(EVENT_MARKET_UPDATE, &mut data);
+            // Only emit IndexedObject event - no backward compatibility needed
+            emit_market_indexed_object(&market, market_id);
         }
     }
 
@@ -375,10 +371,26 @@ impl MarketManager {
         
         let mut global_state = GLOBAL_STATE.0.borrow_mut();
         let market_id = global_state.next_market_id;
+        let timestamp = global_state.counter;
         global_state.next_market_id += 1;
         global_state.market_ids.push(market_id);
+        drop(global_state);
         
         Self::store_market(market_id, &market);
+        
+        // Emit IndexedObject event for new market
+        emit_market_indexed_object(&market, market_id);
+        
+        // Emit initial liquidity history entry
+        emit_liquidity_history(
+            market_id, 
+            timestamp, 
+            initial_yes_liquidity, 
+            initial_no_liquidity, 
+            0, // initial volume is 0
+            0  // action_type: 0 = creation
+        );
+        
         Ok(market_id)
     }
 

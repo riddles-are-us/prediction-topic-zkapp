@@ -1,7 +1,8 @@
 use crate::error::*;
-use crate::event::{insert_event, EVENT_BET_UPDATE};
+use crate::event::{insert_event, EVENT_BET_UPDATE, emit_market_indexed_object, emit_liquidity_history};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
+use crate::market::MarketData;
 
 #[derive(Clone)]
 pub enum Command {
@@ -74,7 +75,7 @@ pub enum Activity {
     Resolve(u64, u64),         // market_id, outcome
     Claim(u64),                // market_id
     WithdrawFees(u64),         // market_id
-    CreateMarket(Vec<u64>, u64, u64, u64, u64, u64), // title_u64_vec, start_time, end_time, resolution_time, yes_liquidity, no_liquidity
+    CreateMarket(Vec<u64>, u64, u64, u64, u64, u64), // title_u64_vec, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity
 }
 
 impl CommandHandler for Activity {
@@ -113,6 +114,22 @@ impl CommandHandler for Activity {
 }
 
 impl Activity {
+    // 统一的市场事件发射函数，减少重复代码
+    fn emit_market_update_events(market: &MarketData, market_id: u64, counter: u64, action_type: u64) {
+        // Emit IndexedObject event for updated market
+        emit_market_indexed_object(market, market_id);
+        
+        // Emit liquidity history
+        emit_liquidity_history(
+            market_id,
+            counter,
+            market.yes_liquidity,
+            market.no_liquidity,
+            market.total_volume,
+            action_type
+        );
+    }
+
     fn handle_bet(player: &mut Player, market_id: u64, bet_type: u64, amount: u64, _counter: u64) -> Result<(), u32> {
         if amount == 0 {
             return Err(ERROR_INVALID_BET_AMOUNT);
@@ -147,6 +164,10 @@ impl Activity {
 
         // Emit events
         Self::emit_bet_event(player.player_id, market_id, bet_type, amount, shares, txid, current_time);
+        
+        // 使用统一的事件发射函数
+        Self::emit_market_update_events(&market, market_id, current_time, 1);
+        
         Ok(())
     }
 
@@ -188,6 +209,9 @@ impl Activity {
 
         // Emit events
         Self::emit_sell_event(player.player_id, market_id, sell_type, shares, payout, txid, current_time);
+        
+        // 使用统一的事件发射函数
+        Self::emit_market_update_events(&market, market_id, current_time, 2);
 
         Ok(())
     }
@@ -206,6 +230,10 @@ impl Activity {
         let outcome_bool = outcome != 0;
         market.resolve(outcome_bool)?;
         crate::state::MarketManager::update_market(market_id, &market);
+        
+        // 使用统一的事件发射函数
+        Self::emit_market_update_events(&market, market_id, current_time, 3);
+        
         Ok(())
     }
 
@@ -259,15 +287,20 @@ impl Activity {
         Ok(())
     }
 
-    fn handle_create_market(title_u64_vec: Vec<u64>, start_time: u64, end_time: u64, resolution_time: u64, yes_liquidity: u64, no_liquidity: u64, _counter: u64) -> Result<(), u32> {
-        let description = format!("Prediction market created at time {}", start_time);
+    fn handle_create_market(title_u64_vec: Vec<u64>, start_time_offset: u64, end_time_offset: u64, resolution_time_offset: u64, yes_liquidity: u64, no_liquidity: u64, counter: u64) -> Result<(), u32> {
+        // Calculate absolute times by adding offsets to current counter
+        let absolute_start_time = counter + start_time_offset;
+        let absolute_end_time = counter + end_time_offset;
+        let absolute_resolution_time = counter + resolution_time_offset;
+        
+        let description = format!("Prediction market created at counter {}", counter);
         
         let _market_id = crate::state::MarketManager::create_market_with_title_u64_and_liquidity(
             title_u64_vec,
             description,
-            start_time,
-            end_time,
-            resolution_time,
+            absolute_start_time,
+            absolute_end_time,
+            absolute_resolution_time,
             yes_liquidity,
             no_liquidity,
         )?;

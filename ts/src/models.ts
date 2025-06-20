@@ -16,36 +16,219 @@ export function docToJSON(doc: mongoose.Document) {
     return obj;
 }
 
-// Multi-Market Support - Market Info per market ID
-interface MarketInfo {
-    marketId: bigint;
-    counter: bigint;
-    title: string;
+// Market info constants for IndexedObject
+export const MARKET_INFO = 1;
+export const LIQUIDITY_HISTORY_INFO = 2;
+
+// 操作类型枚举，提高代码可读性
+export enum ActionType {
+    CREATION = 0,
+    BET = 1,
+    SELL = 2,
+    RESOLUTION = 3
+}
+
+// 价格计算工具类
+export class PriceCalculator {
+    static calculatePrice(yesLiquidity: bigint, noLiquidity: bigint): { yesPrice: bigint, noPrice: bigint } {
+        const totalLiq = yesLiquidity + noLiquidity;
+        if (totalLiq === 0n) {
+            return { yesPrice: 500000n, noPrice: 500000n }; // 50% each
+        }
+        return {
+            yesPrice: (noLiquidity * 1000000n) / totalLiq,
+            noPrice: (yesLiquidity * 1000000n) / totalLiq
+        };
+    }
+    
+    static calculateTotalLiquidity(yesLiquidity: bigint, noLiquidity: bigint): bigint {
+        return yesLiquidity + noLiquidity;
+    }
+}
+
+// IndexedObject class like other projects
+export class IndexedObject {
+    // object index
+    index: number;
+    // data array
+    data: bigint[];
+
+    constructor(index: number, data: bigint[]) {
+        this.index = index;
+        this.data = data;
+    }
+
+    toObject() {
+        if (this.index === MARKET_INFO) {
+            return MarketData.fromData(this.data);
+        } else if (this.index === LIQUIDITY_HISTORY_INFO) {
+            return LiquidityHistoryEntry.fromData(this.data);
+        } else {
+            console.log("fatal, unexpected object index:", this.index);
+            process.exit();
+        }
+    }
+
+    toJSON() {
+        return JSON.stringify(this.toObject());
+    }
+
+    static fromEvent(data: BigUint64Array): IndexedObject {
+        // Extract index and data, with marketId as second element for MARKET_INFO
+        const index = Number(data[0]);
+        if (index === MARKET_INFO) {
+            // For market info: [index, marketId, ...market_data]
+            const marketId = data[1];
+            const marketData = Array.from(data.slice(2));
+            return new IndexedObject(index, [marketId, ...marketData]);
+        } else {
+            // For other types, use normal format
+            return new IndexedObject(index, Array.from(data.slice(1)));
+        }
+    }
+
+    async storeRelatedObject() {
+        let obj = this.toObject() as any;
+        if (this.index === MARKET_INFO) {
+            // Store in main MarketModel using IndexedObject pattern
+            let doc = await MarketModel.findOneAndUpdate({marketId: obj.marketId}, obj, {upsert: true});
+            return doc;
+        } else if (this.index === LIQUIDITY_HISTORY_INFO) {
+            let doc = await LiquidityHistoryModel.findOneAndUpdate(
+                {marketId: obj.marketId, counter: obj.counter}, 
+                obj, 
+                {upsert: true}
+            );
+            return doc;
+        }
+    }
+}
+
+// Market data structure matching Rust backend
+export class MarketData {
+    marketId?: bigint;
+    title: bigint[];
     description: string;
     startTime: bigint;
     endTime: bigint;
     resolutionTime: bigint;
     yesLiquidity: bigint;
     noLiquidity: bigint;
+    prizePool: bigint;
     totalVolume: bigint;
     totalYesShares: bigint;
     totalNoShares: bigint;
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: bigint;
+
+    constructor(data: any) {
+        this.title = data.title || [];
+        this.description = data.description || "";
+        this.startTime = data.startTime || 0n;
+        this.endTime = data.endTime || 0n;
+        this.resolutionTime = data.resolutionTime || 0n;
+        this.yesLiquidity = data.yesLiquidity || 0n;
+        this.noLiquidity = data.noLiquidity || 0n;
+        this.prizePool = data.prizePool || 0n;
+        this.totalVolume = data.totalVolume || 0n;
+        this.totalYesShares = data.totalYesShares || 0n;
+        this.totalNoShares = data.totalNoShares || 0n;
+        this.resolved = data.resolved || false;
+        this.outcome = data.outcome;
+        this.totalFeesCollected = data.totalFeesCollected || 0n;
+    }
+
+    static fromData(data: bigint[]): MarketData {
+        // Parse the data array according to Rust MarketData::to_data format
+        // First element is marketId from IndexedObject
+        let index = 0;
+        const marketId = data[index++];
+        
+        // Read title length and title data
+        const titleLen = Number(data[index++]);
+        const title = data.slice(index, index + titleLen);
+        index += titleLen;
+        
+        // Skip description for now as it's not in the u64 data
+        const description = "";
+        
+        const startTime = data[index++];
+        const endTime = data[index++];
+        const resolutionTime = data[index++];
+        const yesLiquidity = data[index++];
+        const noLiquidity = data[index++];
+        const prizePool = data[index++];
+        const totalVolume = data[index++];
+        const totalYesShares = data[index++];
+        const totalNoShares = data[index++];
+        const resolved = data[index++] === 1n;
+        const outcomeValue = data[index++];
+        const outcome = outcomeValue === 0n ? null : (outcomeValue === 2n ? true : false);
+        const totalFeesCollected = data[index++];
+
+        const marketData = new MarketData({
+            title,
+            description,
+            startTime,
+            endTime,
+            resolutionTime,
+            yesLiquidity,
+            noLiquidity,
+            prizePool,
+            totalVolume,
+            totalYesShares,
+            totalNoShares,
+            resolved,
+            outcome,
+            totalFeesCollected
+        });
+        marketData.marketId = marketId;
+        return marketData;
+    }
 }
 
-// Market Schema
-const marketSchema = new mongoose.Schema<MarketInfo>({
-    marketId: { type: BigInt, required: true, unique: true},
-    counter: { type: BigInt, required: true },
-    title: { type: String, required: true },
+// Liquidity History Entry
+export class LiquidityHistoryEntry {
+    marketId: bigint;
+    counter: bigint;
+    yesLiquidity: bigint;
+    noLiquidity: bigint;
+    totalVolume: bigint;
+    actionType: bigint; // 0 = creation, 1 = bet, 2 = sell, 3 = resolution
+
+    constructor(data: any) {
+        this.marketId = data.marketId;
+        this.counter = data.counter;
+        this.yesLiquidity = data.yesLiquidity;
+        this.noLiquidity = data.noLiquidity;
+        this.totalVolume = data.totalVolume;
+        this.actionType = data.actionType;
+    }
+
+    static fromData(data: bigint[]): LiquidityHistoryEntry {
+        return new LiquidityHistoryEntry({
+            marketId: data[0],
+            counter: data[1],
+            yesLiquidity: data[2],
+            noLiquidity: data[3],
+            totalVolume: data[4],
+            actionType: data[5]
+        });
+    }
+}
+
+// Market Object Schema for IndexedObject pattern - main storage
+const marketObjectSchema = new mongoose.Schema({
+    marketId: { type: BigInt, required: true, unique: true },
+    title: { type: [BigInt], required: true },
     description: { type: String, required: true },
     startTime: { type: BigInt, required: true },
     endTime: { type: BigInt, required: true },
     resolutionTime: { type: BigInt, required: true },
     yesLiquidity: { type: BigInt, required: true },
     noLiquidity: { type: BigInt, required: true },
+    prizePool: { type: BigInt, default: 0n },
     totalVolume: { type: BigInt, default: 0n },
     totalYesShares: { type: BigInt, default: 0n },
     totalNoShares: { type: BigInt, default: 0n },
@@ -54,9 +237,21 @@ const marketSchema = new mongoose.Schema<MarketInfo>({
     totalFeesCollected: { type: BigInt, default: 0n },
 });
 
-marketSchema.pre('init', ObjectEvent.uint64FetchPlugin);
-marketSchema.index({ marketId: 1 });
-marketSchema.index({ resolved: 1 });
+marketObjectSchema.pre('init', ObjectEvent.uint64FetchPlugin);
+
+// Liquidity History Schema
+const liquidityHistorySchema = new mongoose.Schema({
+    marketId: { type: BigInt, required: true },
+    counter: { type: BigInt, required: true },
+    yesLiquidity: { type: BigInt, required: true },
+    noLiquidity: { type: BigInt, required: true },
+    totalVolume: { type: BigInt, required: true },
+    actionType: { type: BigInt, required: true }, // 0 = creation, 1 = bet, 2 = sell, 3 = resolution
+});
+
+liquidityHistorySchema.pre('init', ObjectEvent.uint64FetchPlugin);
+liquidityHistorySchema.index({ marketId: 1, counter: 1 }, { unique: true });
+liquidityHistorySchema.index({ marketId: 1, counter: -1 });
 
 // Multi-Market Bet Interface
 export interface Bet {
@@ -106,35 +301,13 @@ const playerMarketPositionSchema = new mongoose.Schema<PlayerMarketPosition>({
 playerMarketPositionSchema.pre('init', ObjectEvent.uint64FetchPlugin);
 playerMarketPositionSchema.index({ pid: 1, marketId: 1 }, { unique: true });
 
-export const MarketModel = mongoose.model('Market', marketSchema);
+// Main market model using IndexedObject pattern
+export const MarketModel = mongoose.model('Market', marketObjectSchema);
+export const LiquidityHistoryModel = mongoose.model('LiquidityHistory', liquidityHistorySchema);
 export const BetModel = mongoose.model('Bet', betSchema);
 export const PlayerMarketPositionModel = mongoose.model('PlayerMarketPosition', playerMarketPositionSchema);
 
-// Event handling classes
-export class MarketEvent {
-    index: bigint;
-    data: bigint[];
-
-    constructor(
-        index: bigint, data: bigint[]
-    ) {
-        this.index = index;
-        this.data = data;
-    }
-
-    static fromEvent(data: BigUint64Array): MarketEvent {
-        return new MarketEvent(data[0],  Array.from(data.slice(1)));
-    }
-
-    toObject() {
-        return {
-            marketId: this.data[0],
-            counter: this.index,
-            yesLiquidity: this.data[1],
-            noLiquidity: this.data[2],
-        };
-    }
-}
+// Event handling classes for BET events only (MarketEvent removed as unused)
 
 export class BetEvent {
     index: bigint;
@@ -147,18 +320,38 @@ export class BetEvent {
     }
 
     static fromEvent(data: BigUint64Array): BetEvent {
-        return new BetEvent(data[0],  Array.from(data.slice(1)));
+        // For BetEvent, the data directly contains the 8 elements we need
+        // [txid, pid1, pid2, market_id, bet_type, amount, shares, counter]
+        return new BetEvent(0n, Array.from(data));
     }
 
     toObject(): Bet {
+        // Add data length validation
+        if (this.data.length < 8) {
+            console.error("BetEvent data length insufficient:", this.data.length, "expected 8, data:", this.data);
+            throw new Error(`Invalid BetEvent data length: ${this.data.length}, expected 8`);
+        }
+        
+        // Event data format differs between bet and sell:
+        // BET:  [txid, pid1, pid2, market_id, bet_type, amount, shares, counter]
+        // SELL: [txid, pid1, pid2, market_id, sell_type+10, shares, payout, counter]
+        const betType = Number(this.data[4]);
+        const isSell = betType >= 10;
+        
+        // Validate betType range
+        if (betType < 0 || betType > 12) {
+            console.error("Invalid betType:", betType, "data:", this.data);
+            throw new Error(`Invalid betType: ${betType}`);
+        }
+        
         return {
-            index: this.index,
-            pid: [this.data[0], this.data[1]], // pid1, pid2
-            marketId: this.data[2], // market_id
-            betType: Number(this.data[3]), // betType
-            amount: this.data[4],
-            shares: this.data[5],
-            counter: this.data[6],
+            index: this.data[0], // txid
+            pid: [this.data[1], this.data[2]], // pid1, pid2
+            marketId: this.data[3], // market_id
+            betType: betType,
+            amount: isSell ? this.data[6] : this.data[5], // For sell: use payout as amount
+            shares: isSell ? this.data[5] : this.data[6], // For sell: data[5] is shares sold
+            counter: this.data[7],
         };
     }
 }

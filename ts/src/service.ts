@@ -2,7 +2,7 @@ import { Express } from "express";
 import mongoose from 'mongoose';
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { BetEvent, BetModel, MarketEvent, MarketModel, PlayerMarketPositionModel, docToJSON, u64ArrayToString } from "./models.js";
+import { ActionType, BetEvent, BetModel, docToJSON, IndexedObject, LiquidityHistoryModel, MarketModel, PlayerMarketPositionModel, u64ArrayToString } from "./models.js";
 
 const service = new Service(eventCallback, batchedCallback, extra);
 await service.initialize();
@@ -16,9 +16,9 @@ function extra(app: Express) {
       const doc = await MarketModel.find({}).sort({ marketId: 1 });
       let data = doc.map((d) => {
         const market = docToJSON(d);
-        // Convert title from u64 array if needed
-        if (market.titleU64) {
-          market.title = u64ArrayToString(market.titleU64);
+        // Convert title from u64 array to string
+        if (market.title && Array.isArray(market.title)) {
+          market.titleString = u64ArrayToString(market.title);
         }
         return market;
       });
@@ -50,9 +50,9 @@ function extra(app: Express) {
       }
       
       const market = docToJSON(doc);
-      // Convert title from u64 array if needed
-      if (market.titleU64) {
-        market.title = u64ArrayToString(market.titleU64);
+      // Convert title from u64 array to string
+      if (market.title && Array.isArray(market.title)) {
+        market.titleString = u64ArrayToString(market.title);
       }
       
       res.status(200).send({
@@ -245,44 +245,34 @@ function extra(app: Express) {
     }
   });
 
-  // Get market liquidity history for recent 100 counters (only liquidity data)
+  // Get market liquidity history from IndexedObject data (enhanced with actionType and prices)
   app.get("/data/market/:marketId/liquidity", async (req: any, res) => {
     try {
       const marketId = BigInt(req.params.marketId);
+      const limit = parseInt(req.query.limit || '100');
       
-      // Get the latest counter for this market
-      const latestMarket = await MarketModel.findOne({ marketId }).sort({ counter: -1 });
-      if (!latestMarket) {
-        res.status(404).send({
-          success: false,
-          error: "Market not found"
-        });
-        return;
-      }
-      
-      const latestCounter = latestMarket.counter;
-      const startCounter = latestCounter - 100n < 0n ? 0n : latestCounter - 100n;
-      
-      // Get market data for recent 100 counters
-      const doc = await MarketModel.find({
-        marketId: marketId,
-        counter: { $gte: startCounter, $lte: latestCounter }
-      }).sort({ counter: 1 });
+      // Get liquidity history from LiquidityHistoryModel (from IndexedObject events)
+      const doc = await LiquidityHistoryModel.find({
+        marketId: marketId
+              }).sort({ counter: -1 }).limit(limit);
       
       let data = doc.map((d) => {
-        const market = docToJSON(d);
+        const history = docToJSON(d);
         
         return {
-          counter: market.counter,
-          yesLiquidity: market.yesLiquidity,
-          noLiquidity: market.noLiquidity,
-          timestamp: market.counter // Using counter as timestamp
+          marketId: history.marketId,
+          counter: history.counter,
+          yesLiquidity: history.yesLiquidity,
+          noLiquidity: history.noLiquidity,
+          totalVolume: history.totalVolume,
+          actionType: history.actionType,
+          actionTypeName: ActionType[Number(history.actionType)] || 'UNKNOWN'
         };
       });
       
       res.status(200).send({
         success: true,
-        data: data,
+        data: data.reverse(), // Return in ascending order
       });
     } catch (e) {
       console.log("Error fetching market liquidity history:", e);
@@ -292,12 +282,14 @@ function extra(app: Express) {
       });
     }
   });
+
+
 }
 
 service.serve();
 
-const EVENT_MARKET_UPDATE = 1;
-const EVENT_BET_UPDATE = 2;
+const EVENT_BET_UPDATE = 3;
+const EVENT_INDEXED_OBJECT = 4;
 
 async function batchedCallback(_arg: TxWitness[], _preMerkle: string, postMerkle: string) {
     await txStateManager.moveToCommit(postMerkle);
@@ -343,56 +335,69 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
         console.log("Processing event:", eventType, eventLength, eventData);
 
         switch (eventType) {
-            case EVENT_MARKET_UPDATE:
-                {
-                    console.log("market update event");
-                    let market = MarketEvent.fromEvent(eventData);
-                    let marketInfo = market.toObject();
-                    
-                    // Update market with new liquidity data
-                    await MarketModel.findOneAndUpdate(
-                        { marketId: marketInfo.marketId }, 
-                        { 
-                            $set: {
-                                counter: marketInfo.counter,
-                                yesLiquidity: marketInfo.yesLiquidity,
-                                noLiquidity: marketInfo.noLiquidity
-                            }
-                        }, 
-                        { upsert: false } // Don't create new markets via events
-                    );
-                    console.log("saved market update", market);
-                }
-                break;
             case EVENT_BET_UPDATE:
                 {
                     console.log("bet update event");
-                    let bet = BetEvent.fromEvent(eventData);
-                    let betData = bet.toObject();
-                    
-                    // Save bet
-                    let doc = new BetModel(betData);
-                    await doc.save();
-                    
-                    // Update or create player market position
-                    const positionUpdate = {
-                        $inc: betData.betType >= 10 ? 
-                            // Selling shares (betType 11=SELL_YES, 12=SELL_NO)
-                            (betData.betType === 11 ? { yesShares: -betData.shares } : { noShares: -betData.shares }) :
-                            // Buying shares (betType 1=YES, 0=NO)
-                            (betData.betType === 1 ? { yesShares: betData.shares } : { noShares: betData.shares })
-                    };
-                    
-                    await PlayerMarketPositionModel.findOneAndUpdate(
-                        { 
-                            pid: betData.pid,
-                            marketId: betData.marketId
-                        },
-                        positionUpdate,
-                        { upsert: true, setDefaultsOnInsert: true }
-                    );
-                    
-                    console.log("saved bet and updated position", bet);
+                    console.log("Raw eventData:", eventData, "length:", eventData.length);
+                    console.log("Raw eventData as array:", Array.from(eventData));
+                    try {
+                        let bet = BetEvent.fromEvent(eventData);
+                        console.log("BetEvent object:", { index: bet.index, data: bet.data, dataLength: bet.data.length });
+                        console.log("BetEvent data elements:", bet.data.map((d, i) => `[${i}]: ${d}`));
+                        let betData = bet.toObject();
+                        
+                        console.log("Parsed bet data:", betData);
+                        
+                        // Validate bet data
+                        if (isNaN(betData.betType) || betData.betType < 0) {
+                            console.log("Invalid betType:", betData.betType, "skipping event");
+                            break;
+                        }
+                        
+                        // Save bet
+                        let doc = new BetModel(betData);
+                        await doc.save();
+                        
+                        // Update or create player market position
+                        const positionUpdate = {
+                            $inc: betData.betType >= 10 ? 
+                                // Selling shares (betType 11=SELL_YES, 12=SELL_NO)
+                                (betData.betType === 11 ? { yesShares: -betData.shares } : { noShares: -betData.shares }) :
+                                // Buying shares (betType 1=YES, 0=NO)
+                                (betData.betType === 1 ? { yesShares: betData.shares } : { noShares: betData.shares })
+                        };
+                        
+                        await PlayerMarketPositionModel.findOneAndUpdate(
+                            { 
+                                pid: betData.pid,
+                                marketId: betData.marketId
+                            },
+                            positionUpdate,
+                            { upsert: true, setDefaultsOnInsert: true }
+                        );
+                        
+                        // Note: Market data updates are now handled via IndexedObject events only
+                        // No need to manually update market totalVolume here
+                        
+                        console.log("saved bet and updated position", bet);
+                    } catch (error) {
+                        console.log("Error processing bet event:", error);
+                        console.log("Event data:", eventData);
+                        // Don't exit the process, just skip this event
+                    }
+                }
+                break;
+            case EVENT_INDEXED_OBJECT:
+                {
+                    console.log("indexed object event");
+                    try {
+                        let obj = IndexedObject.fromEvent(eventData);
+                        let doc = await obj.storeRelatedObject();
+                        console.log("saved indexed object", doc);
+                    } catch (error) {
+                        console.log("Error processing indexed object event:", error);
+                        console.log("Event data:", eventData);
+                    }
                 }
                 break;
             default:

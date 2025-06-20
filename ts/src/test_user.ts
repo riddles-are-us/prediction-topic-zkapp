@@ -31,7 +31,7 @@ async function main() {
 
     // Step 1: Install players
     console.log("1. Installing players...");
-    try {
+  try {
       await adminPlayer.installPlayer();
       console.log("  Admin installed");
     } catch (e) {
@@ -57,26 +57,28 @@ async function main() {
     console.log("\n2. Creating a new market...");
     try {
       const marketTitle = "Will Bitcoin reach $100K by 2025?";
-      const startTime = BigInt(Math.floor(Date.now() / 1000)); // Current time
-      const endTime = BigInt(Math.floor(Date.now() / 1000) + 86400 * 30); // 30 days later
-      const resolutionTime = endTime + BigInt(86400); // 1 day after end time
+      // Using relative time offsets (relative to current counter)
+      const startTimeOffset = 0n;    // Start immediately 
+      const endTimeOffset = 100n;    // End after 100 counter ticks
+      const resolutionTimeOffset = 120n; // Resolve after 120 counter ticks
       const initialLiquidity = 50000n; // 50,000 units initial liquidity
       
       console.log(`  Creating market: "${marketTitle}"`);
       console.log(`  Initial liquidity: ${initialLiquidity} each side`);
+      console.log(`  Time offsets: start=${startTimeOffset}, end=${endTimeOffset}, resolve=${resolutionTimeOffset}`);
       
       await adminPlayer.createMarket(
         marketTitle,
-        startTime,
-        endTime,
-        resolutionTime,
+        startTimeOffset,
+        endTimeOffset,
+        resolutionTimeOffset,
         initialLiquidity,
         initialLiquidity
       );
       console.log("  Market created successfully!");
-    } catch (e) {
+  } catch (e) {
       console.log("  Market creation failed:", e);
-    }
+  }
     await delay(3000);
 
     // Step 3: Get all markets
@@ -92,14 +94,16 @@ async function main() {
     // Use the first available market for testing
     const testMarket = markets[0];
     const marketId = BigInt(testMarket.marketId);
-    console.log(`  Using market ${testMarket.marketId}: "${testMarket.title}"`);
+    console.log(`  Using market ${testMarket.marketId}: "${testMarket.titleString || 'No title'}"`);
     console.log(`  YES Liquidity: ${testMarket.yesLiquidity}`);
     console.log(`  NO Liquidity: ${testMarket.noLiquidity}`);
+    console.log(`  Prize Pool: ${testMarket.prizePool}`);
+    console.log(`  Total Volume: ${testMarket.totalVolume}`);
     await delay(1000);
 
     // Step 4: Player 1 places a YES bet
     console.log("\n4. Player 1 placing YES bet...");
-    try {
+  try {
       const betAmount = 5000n;
       console.log(`  Betting ${betAmount} on YES`);
       
@@ -129,8 +133,10 @@ async function main() {
     console.log("\n6. Checking updated market state...");
     const updatedMarket = await api.getMarket(testMarket.marketId);
     console.log("  Updated market data:");
+    console.log(`    Title: ${updatedMarket.titleString || 'No title'}`);
     console.log(`    YES Liquidity: ${updatedMarket.yesLiquidity}`);
     console.log(`    NO Liquidity: ${updatedMarket.noLiquidity}`);
+    console.log(`    Prize Pool: ${updatedMarket.prizePool}`);
     console.log(`    Total Volume: ${updatedMarket.totalVolume}`);
     console.log(`    Total YES Shares: ${updatedMarket.totalYesShares}`);
     console.log(`    Total NO Shares: ${updatedMarket.totalNoShares}`);
@@ -148,8 +154,8 @@ async function main() {
     
     console.log("  Player 1 position in this market:");
     const player1Position = await api.getPlayerMarketPosition(
-      pubkey1[0].toString(), 
-      pubkey1[1].toString(),
+      pubkey1[1].toString(), 
+      pubkey1[2].toString(),
       testMarket.marketId
     );
     console.log(`    YES Shares: ${player1Position.yesShares}`);
@@ -158,8 +164,8 @@ async function main() {
 
     console.log("  Player 2 position in this market:");
     const player2Position = await api.getPlayerMarketPosition(
-      pubkey2[0].toString(), 
-      pubkey2[1].toString(),
+      pubkey2[1].toString(), 
+      pubkey2[2].toString(),
       testMarket.marketId
     );
     console.log(`    YES Shares: ${player2Position.yesShares}`);
@@ -168,8 +174,8 @@ async function main() {
 
     console.log("  Player 1 all positions:");
     const player1AllPositions = await api.getPlayerAllPositions(
-      pubkey1[0].toString(), 
-      pubkey1[1].toString()
+      pubkey1[1].toString(), 
+      pubkey1[2].toString()
     );
     player1AllPositions.forEach((pos, idx) => {
       console.log(`    Market ${pos.marketId}: YES=${pos.yesShares}, NO=${pos.noShares}, Claimed=${pos.claimed}`);
@@ -191,8 +197,8 @@ async function main() {
     
     console.log("  Player 1 recent transactions across all markets:");
     const player1Transactions = await api.getPlayerRecentTransactions(
-      pubkey1[0].toString(), 
-      pubkey1[1].toString()
+      pubkey1[1].toString(), 
+      pubkey1[2].toString()
     );
     player1Transactions.forEach((tx, idx) => {
       console.log(`    ${idx + 1}. Market ${tx.marketId} - ${tx.transactionType}: ${tx.amount} → ${tx.shares}`);
@@ -200,8 +206,8 @@ async function main() {
 
     console.log("  Player 1 transactions in this market:");
     const player1MarketTransactions = await api.getPlayerMarketRecentTransactions(
-      pubkey1[0].toString(), 
-      pubkey1[1].toString(),
+      pubkey1[1].toString(), 
+      pubkey1[2].toString(),
       testMarket.marketId
     );
     player1MarketTransactions.forEach((tx, idx) => {
@@ -210,8 +216,8 @@ async function main() {
 
     console.log("  Player 2 recent transactions across all markets:");
     const player2Transactions = await api.getPlayerRecentTransactions(
-      pubkey2[0].toString(), 
-      pubkey2[1].toString()
+      pubkey2[1].toString(), 
+      pubkey2[2].toString()
     );
     player2Transactions.forEach((tx, idx) => {
       console.log(`    ${idx + 1}. Market ${tx.marketId} - ${tx.transactionType}: ${tx.amount} → ${tx.shares}`);

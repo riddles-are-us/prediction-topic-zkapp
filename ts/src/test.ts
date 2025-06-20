@@ -98,37 +98,30 @@ class Player extends PlayerConvention {
         return await this.sendTransactionWithCommand(cmd);
     }
 
-    // New function to create markets
+    // New function to create markets with relative time offsets
     async createMarket(
         title: string,
-        startTime: bigint,
-        endTime: bigint,
-        resolutionTime: bigint,
+        startTimeOffset: bigint,    // Offset from current counter
+        endTimeOffset: bigint,      // Offset from current counter
+        resolutionTimeOffset: bigint, // Offset from current counter
         yesLiquidity: bigint,
         noLiquidity: bigint
     ) {
         let nonce = await this.getNonce();
         const titleU64Array = stringToU64Array(title);
         
-        // Build command: [cmd, title_len, ...title_u64s, start_time, end_time, resolution_time, yes_liquidity, no_liquidity]
+        // Build command: [cmd, title_len, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
         const params = [
             BigInt(titleU64Array.length),
             ...titleU64Array,
-            startTime,
-            endTime,
-            resolutionTime,
+            startTimeOffset,
+            endTimeOffset,
+            resolutionTimeOffset,
             yesLiquidity,
             noLiquidity
         ];
         
         let cmd = createCommand(nonce, BigInt(CREATE_MARKET), params);
-        return await this.sendTransactionWithCommand(cmd);
-    }
-
-    // New tick function for testing
-    async tick() {
-        let nonce = await this.getNonce();
-        let cmd = createCommand(nonce, BigInt(TICK), []);
         return await this.sendTransactionWithCommand(cmd);
     }
 }
@@ -260,16 +253,15 @@ async function testMultiMarketPrediction() {
         // Step 2: Admin creates multiple markets (CREATE_MARKET command)
         console.log("\n=== STEP 2: Creating Multiple Markets (CREATE_MARKET) ===");
         
-        const currentTime = BigInt(Math.floor(Date.now() / 1000));
-        const oneDay = 86400n;
+        // Now using relative time offsets (relative to current counter)
         
         // Market 1: Bitcoin price prediction
         console.log("Creating Market 1: Bitcoin Price Prediction");
         await admin.createMarket(
             "Will Bitcoin reach $100K by end of 2024?",
-            currentTime,
-            currentTime + oneDay * 30n, // 30 days
-            currentTime + oneDay * 31n, // 31 days
+            0n,    // Start immediately (offset 0)
+            50n,  // End after 50 counter ticks
+            50n,  // Resolve after 50 counter ticks
             50000n, // 50K initial YES liquidity
             50000n  // 50K initial NO liquidity
         );
@@ -280,9 +272,9 @@ async function testMultiMarketPrediction() {
         console.log("Creating Market 2: Election Prediction");
         await admin.createMarket(
             "Will candidate A win the election?",
-            currentTime,
-            currentTime + oneDay * 60n, // 60 days
-            currentTime + oneDay * 61n, // 61 days
+            0n,    // Start immediately (offset 0)
+            50n,  // End after 50 counter ticks
+            50n,  // Resolve after 50 counter ticks
             30000n, // 30K initial YES liquidity
             70000n  // 70K initial NO liquidity (biased market)
         );
@@ -293,9 +285,9 @@ async function testMultiMarketPrediction() {
         console.log("Creating Market 3: Sports Prediction");
         await admin.createMarket(
             "Will Team X win the championship?",
-            currentTime,
-            currentTime + oneDay * 15n, // 15 days
-            currentTime + oneDay * 16n, // 16 days
+            0n,    // Start immediately (offset 0)
+            50n,  // End after 50 counter ticks
+            50n,  // Resolve after 50 counter ticks
             25000n, // 25K initial YES liquidity
             25000n  // 25K initial NO liquidity
         );
@@ -305,13 +297,13 @@ async function testMultiMarketPrediction() {
         // Step 3: Admin deposits funds for all players (DEPOSIT command)
         console.log("\n=== STEP 3: Admin Deposits Funds (DEPOSIT) ===");
         
-        await admin.depositFunds(10000n, player1PkeyArray[0], player1PkeyArray[1]);
+        await admin.depositFunds(10000n, player1PkeyArray[1], player1PkeyArray[2]);
         console.log("Deposited 10000 for Player1");
         
-        await admin.depositFunds(8000n, player2PkeyArray[0], player2PkeyArray[1]);
+        await admin.depositFunds(8000n, player2PkeyArray[1], player2PkeyArray[2]);
         console.log("Deposited 8000 for Player2");
 
-        await admin.depositFunds(12000n, player3PkeyArray[0], player3PkeyArray[1]);
+        await admin.depositFunds(12000n, player3PkeyArray[1], player3PkeyArray[2]);
         console.log("Deposited 12000 for Player3");
         
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -409,10 +401,10 @@ async function testMultiMarketPrediction() {
             console.log("Player1 sell error:", error);
         }
 
-        // Player2 sells some NO shares from Market 2
+        // Player2 sells some YES shares from Market 2 (he bought YES shares, not NO)
         try {
-            await player2.sellShares(market2Id, 0, 300n); // Sell NO shares  
-            console.log("Player2 sold 300 NO shares from Market 2");
+            await player2.sellShares(market2Id, 1, 300n); // Sell YES shares  
+            console.log("Player2 sold 300 YES shares from Market 2");
         } catch (error) {
             console.log("Player2 sell error:", error);
         }
@@ -427,20 +419,8 @@ async function testMultiMarketPrediction() {
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Step 8: Test TICK command
-        console.log("\n=== STEP 8: Testing TICK Command ===");
-        
-        try {
-            await admin.tick();
-            console.log("Admin executed TICK command");
-        } catch (error) {
-            console.log("TICK command error:", error);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Step 9: Resolve markets (RESOLVE command)
-        console.log("\n=== STEP 9: Resolving Markets (RESOLVE) ===");
+        // Step 8: Resolve markets (RESOLVE command)
+        console.log("\n=== STEP 8: Resolving Markets (RESOLVE) ===");
         
         // Resolve Market 1: YES wins
         try {
@@ -468,8 +448,8 @@ async function testMultiMarketPrediction() {
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Step 10: Players claim winnings (CLAIM command)
-        console.log("\n=== STEP 10: Players Claim Winnings (CLAIM) ===");
+        // Step 9: Players claim winnings (CLAIM command)
+        console.log("\n=== STEP 9: Players Claim Winnings (CLAIM) ===");
         
         // Each player claims from each market
         const markets = [market1Id, market2Id, market3Id];
@@ -496,8 +476,8 @@ async function testMultiMarketPrediction() {
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Step 11: Admin withdraws fees from all markets (WITHDRAW_FEES command)
-        console.log("\n=== STEP 11: Admin Withdraws Fees (WITHDRAW_FEES) ===");
+        // Step 10: Admin withdraws fees from all markets (WITHDRAW_FEES command)
+        console.log("\n=== STEP 10: Admin Withdraws Fees (WITHDRAW_FEES) ===");
         
         for (const marketId of markets) {
             try {
@@ -514,8 +494,8 @@ async function testMultiMarketPrediction() {
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Step 12: Test WITHDRAW command
-        console.log("\n=== STEP 12: Players Test Withdrawal (WITHDRAW) ===");
+        // Step 11: Test WITHDRAW command
+        console.log("\n=== STEP 11: Players Test Withdrawal (WITHDRAW) ===");
         
         // Player1 attempts to withdraw some funds
         try {
@@ -527,8 +507,8 @@ async function testMultiMarketPrediction() {
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Step 13: Final state logging
-        console.log("\n=== STEP 13: Final State Summary ===");
+        // Step 12: Final state logging
+        console.log("\n=== STEP 12: Final State Summary ===");
         
         await logStateInfo(rpc, admin, "Admin", "Final State");
         await logStateInfo(rpc, player1, "Player1", "Final State");
@@ -542,7 +522,6 @@ async function testMultiMarketPrediction() {
         console.log("✓ DEPOSIT");
         console.log("✓ BET (multiple markets, multiple players)");
         console.log("✓ SELL (cross-market selling)");
-        console.log("✓ TICK");
         console.log("✓ RESOLVE (multiple markets)");
         console.log("✓ CLAIM (cross-market claiming)");
         console.log("✓ WITHDRAW_FEES (multiple markets)");

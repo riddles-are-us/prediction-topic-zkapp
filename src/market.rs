@@ -1,8 +1,10 @@
 use serde::Serialize;
 use zkwasm_rest_abi::StorageData;
+use zkwasm_rest_convention::IndexedObject;
 use crate::config::PRICE_PRECISION;
 use crate::error::*;
 use crate::math_safe::*;
+
 
 #[derive(Serialize, Clone, Debug)]
 pub struct MarketData {
@@ -463,4 +465,10 @@ impl StorageData for MarketData {
         });
         data.push(self.total_fees_collected);
     }
+}
+
+impl IndexedObject<MarketData> for MarketData {
+    const PREFIX: u64 = 0x1ee3;
+    const POSTFIX: u64 = 0xfee3;
+    const EVENT_NAME: u64 = 0x02;
 } 

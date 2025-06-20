@@ -88,25 +88,25 @@ export class Player extends PlayerConvention {
         return await this.sendTransactionWithCommand(cmd);
     }
 
-    // New function to create markets
+    // Create markets with relative time offsets
     async createMarket(
         title: string,
-        startTime: bigint,
-        endTime: bigint,
-        resolutionTime: bigint,
+        startTimeOffset: bigint,    // Offset from current counter
+        endTimeOffset: bigint,      // Offset from current counter
+        resolutionTimeOffset: bigint, // Offset from current counter
         yesLiquidity: bigint,
         noLiquidity: bigint
     ) {
         let nonce = await this.getNonce();
         const titleU64Array = stringToU64Array(title);
         
-        // Build command: [cmd, title_len, ...title_u64s, start_time, end_time, resolution_time, yes_liquidity, no_liquidity]
+        // Build command: [cmd, title_len, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
         const params = [
             BigInt(titleU64Array.length),
             ...titleU64Array,
-            startTime,
-            endTime,
-            resolutionTime,
+            startTimeOffset,
+            endTimeOffset,
+            resolutionTimeOffset,
             yesLiquidity,
             noLiquidity
         ];
@@ -132,20 +132,20 @@ export class Player extends PlayerConvention {
 export interface MarketData {
     marketId: string;
     title: string;
+    titleString?: string; // Converted from u64 array to string
     description: string;
     startTime: string;
     endTime: string;
     resolutionTime: string;
     yesLiquidity: string;
     noLiquidity: string;
+    prizePool: string;
     totalVolume: string;
     totalYesShares: string;
     totalNoShares: string;
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: string;
-    yesPrice: string;
-    noPrice: string;
 }
 
 export interface TransactionData {
@@ -161,10 +161,13 @@ export interface TransactionData {
 }
 
 export interface LiquidityHistoryData {
+    marketId: string;
     counter: string;
     yesLiquidity: string;
     noLiquidity: string;
-    timestamp: string;
+    totalVolume: string;
+    actionType: string;
+    actionTypeName: string;
 }
 
 export interface PlayerMarketPosition {
@@ -405,9 +408,9 @@ export function buildWithdrawFeesTransaction(nonce: number, marketId: bigint): b
 export function buildCreateMarketTransaction(
     nonce: number,
     title: string,
-    startTime: bigint,
-    endTime: bigint,
-    resolutionTime: bigint,
+    startTimeOffset: bigint,     // Offset from current counter
+    endTimeOffset: bigint,       // Offset from current counter
+    resolutionTimeOffset: bigint, // Offset from current counter
     yesLiquidity: bigint,
     noLiquidity: bigint
 ): bigint[] {
@@ -417,9 +420,9 @@ export function buildCreateMarketTransaction(
         BigInt(CREATE_MARKET),
         BigInt(titleU64Array.length),
         ...titleU64Array,
-        startTime,
-        endTime,
-        resolutionTime,
+        startTimeOffset,
+        endTimeOffset,
+        resolutionTimeOffset,
         yesLiquidity,
         noLiquidity
     ];
