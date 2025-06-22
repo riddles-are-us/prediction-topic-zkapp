@@ -35,13 +35,6 @@ impl GlobalState {
         }
     }
 
-    pub fn emit_market_event(&self, market_id: u64) {
-        if let Some(market) = MarketManager::get_market(market_id) {
-            // Only emit IndexedObject event - no backward compatibility needed
-            emit_market_indexed_object(&market, market_id);
-        }
-    }
-
     pub fn snapshot() -> String {
         let state = GLOBAL_STATE.0.borrow();
         serde_json::to_string(&*state).unwrap()
@@ -255,15 +248,11 @@ impl Transaction {
             // Get all active market IDs
             let market_ids = global_state.market_ids.clone();
             
-            // Emit events for all active markets while still holding the borrow
-            for market_id in &market_ids {
-                global_state.emit_market_event(*market_id);
-            }
-            
             (new_counter, market_ids)
         }; // global_state is dropped here
         
         // Emit liquidity history for each market at this counter
+        // Note: Market IndexedObject events are emitted directly during operations (bet, sell, resolve)
         for market_id in market_ids {
             if let Some(market) = MarketManager::get_market(market_id) {
                 emit_liquidity_history(
@@ -388,28 +377,19 @@ impl MarketManager {
             initial_no_liquidity
         )?;
         
-        let (market_id, timestamp) = {
+        let market_id = {
             let mut global_state = GLOBAL_STATE.0.borrow_mut();
             let market_id = global_state.next_market_id;
-            let timestamp = global_state.counter;
             global_state.next_market_id += 1;
             global_state.market_ids.push(market_id);
             
-            (market_id, timestamp)
+            market_id
         }; // global_state is automatically dropped here
         
         Self::store_market(market_id, &market);
         
         // Emit IndexedObject event for new market
         emit_market_indexed_object(&market, market_id);
-        
-        // Emit initial liquidity history entry
-        emit_liquidity_history(
-            market_id, 
-            timestamp, 
-            initial_yes_liquidity, 
-            initial_no_liquidity
-        );
         
         Ok(market_id)
     }
