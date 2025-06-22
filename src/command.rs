@@ -126,9 +126,10 @@ impl Activity {
             return Err(ERROR_INVALID_BET_TYPE);
         }
 
-        // Check if market is active
-        let current_time = GLOBAL_STATE.0.borrow().ensure_market_active(market_id)?;
-        let txid = GLOBAL_STATE.0.borrow().txcounter;
+        // Check if market is active and get txid
+        let global_state = GLOBAL_STATE.0.borrow();
+        let current_time = global_state.ensure_market_active(market_id)?;
+        let txid = global_state.txcounter;
 
         // Check player balance
         player.data.spend_balance(amount)?;
@@ -162,9 +163,10 @@ impl Activity {
             return Err(ERROR_INVALID_BET_AMOUNT);
         }
 
-        // Check if market is active
-        let current_time = GLOBAL_STATE.0.borrow().ensure_market_active(market_id)?;
-        let txid = GLOBAL_STATE.0.borrow().txcounter;
+        // Check if market is active and get txid
+        let global_state = GLOBAL_STATE.0.borrow();
+        let current_time = global_state.ensure_market_active(market_id)?;
+        let txid = global_state.txcounter;
 
         // Check player has enough shares
         if sell_type == 1 && player.data.get_yes_shares_for_market(&player.player_id, market_id) < shares {

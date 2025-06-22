@@ -248,18 +248,23 @@ impl Transaction {
     }
 
     pub fn tick(&self) {
-        let mut global_state = GLOBAL_STATE.0.borrow_mut();
-        global_state.counter += 1;
-        let new_counter = global_state.counter;
-        // Get all active market IDs
-        let market_ids = global_state.market_ids.clone();
-        drop(global_state);
-        
-        // Emit events for all active markets
-        for market_id in market_ids {
-            GLOBAL_STATE.0.borrow().emit_market_event(market_id);
+        let (new_counter, market_ids) = {
+            let mut global_state = GLOBAL_STATE.0.borrow_mut();
+            global_state.counter += 1;
+            let new_counter = global_state.counter;
+            // Get all active market IDs
+            let market_ids = global_state.market_ids.clone();
             
-            // Emit liquidity history for each market at this counter
+            // Emit events for all active markets while still holding the borrow
+            for market_id in &market_ids {
+                global_state.emit_market_event(*market_id);
+            }
+            
+            (new_counter, market_ids)
+        }; // global_state is dropped here
+        
+        // Emit liquidity history for each market at this counter
+        for market_id in market_ids {
             if let Some(market) = MarketManager::get_market(market_id) {
                 emit_liquidity_history(
                     market_id,
@@ -272,8 +277,9 @@ impl Transaction {
     }
 
     pub fn inc_tx_number(&self) {
-        GLOBAL_STATE.0.borrow_mut().txsize += 1;
-        GLOBAL_STATE.0.borrow_mut().txcounter += 1;
+        let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        global_state.txsize += 1;
+        global_state.txcounter += 1;
     }
 
     pub fn process(&self, pkey: &[u64; 4], rand: &[u64; 4]) -> Vec<u64> {
@@ -382,12 +388,15 @@ impl MarketManager {
             initial_no_liquidity
         )?;
         
-        let mut global_state = GLOBAL_STATE.0.borrow_mut();
-        let market_id = global_state.next_market_id;
-        let timestamp = global_state.counter;
-        global_state.next_market_id += 1;
-        global_state.market_ids.push(market_id);
-        drop(global_state);
+        let (market_id, timestamp) = {
+            let mut global_state = GLOBAL_STATE.0.borrow_mut();
+            let market_id = global_state.next_market_id;
+            let timestamp = global_state.counter;
+            global_state.next_market_id += 1;
+            global_state.market_ids.push(market_id);
+            
+            (market_id, timestamp)
+        }; // global_state is automatically dropped here
         
         Self::store_market(market_id, &market);
         
