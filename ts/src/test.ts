@@ -260,10 +260,10 @@ async function testMultiMarketPrediction() {
         await admin.createMarket(
             "Will Bitcoin reach $100K by end of 2024?",
             0n,    // Start immediately (offset 0)
-            50n,  // End after 50 counter ticks
-            50n,  // Resolve after 50 counter ticks
-            50000n, // 50K initial YES liquidity
-            50000n  // 50K initial NO liquidity
+            10000n,  // End after 50 counter ticks
+            10000n,  // Resolve after 50 counter ticks
+            1000000n, // 50K initial YES liquidity
+            1000000n  // 50K initial NO liquidity
         );
         
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -273,10 +273,10 @@ async function testMultiMarketPrediction() {
         await admin.createMarket(
             "Will candidate A win the election?",
             0n,    // Start immediately (offset 0)
-            50n,  // End after 50 counter ticks
-            50n,  // Resolve after 50 counter ticks
-            30000n, // 30K initial YES liquidity
-            70000n  // 70K initial NO liquidity (biased market)
+            10000n,  // End after 50 counter ticks
+            10000n,  // Resolve after 50 counter ticks
+            1000000n, // 30K initial YES liquidity
+            1000000n  // 70K initial NO liquidity (biased market)
         );
         
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -286,10 +286,10 @@ async function testMultiMarketPrediction() {
         await admin.createMarket(
             "Will Team X win the championship?",
             0n,    // Start immediately (offset 0)
-            50n,  // End after 50 counter ticks
-            50n,  // Resolve after 50 counter ticks
-            25000n, // 25K initial YES liquidity
-            25000n  // 25K initial NO liquidity
+            10000n,  // End after 50 counter ticks
+            10000n,  // Resolve after 50 counter ticks
+            1000000n, // 25K initial YES liquidity
+            1000000n  // 25K initial NO liquidity
         );
 
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -423,58 +423,58 @@ async function testMultiMarketPrediction() {
         console.log("\n=== STEP 8: Resolving Markets (RESOLVE) ===");
         
         // Resolve Market 1: YES wins
-        try {
-            await admin.resolveMarket(market1Id, true); // YES outcome
-            console.log("Market 1 resolved: YES wins");
-        } catch (error) {
-            console.log("Market 1 resolve error:", error);
-        }
+        // try {
+        //     await admin.resolveMarket(market1Id, true); // YES outcome
+        //     console.log("Market 1 resolved: YES wins");
+        // } catch (error) {
+        //     console.log("Market 1 resolve error:", error);
+        // }
         
-        // Resolve Market 2: NO wins
-        try {
-            await admin.resolveMarket(market2Id, false); // NO outcome
-            console.log("Market 2 resolved: NO wins");
-        } catch (error) {
-            console.log("Market 2 resolve error:", error);
-        }
+        // // Resolve Market 2: NO wins
+        // try {
+        //     await admin.resolveMarket(market2Id, false); // NO outcome
+        //     console.log("Market 2 resolved: NO wins");
+        // } catch (error) {
+        //     console.log("Market 2 resolve error:", error);
+        // }
 
-        // Resolve Market 3: YES wins
-        try {
-            await admin.resolveMarket(market3Id, true); // YES outcome
-            console.log("Market 3 resolved: YES wins");
-        } catch (error) {
-            console.log("Market 3 resolve error:", error);
-        }
+        // // Resolve Market 3: YES wins
+        // try {
+        //     await admin.resolveMarket(market3Id, true); // YES outcome
+        //     console.log("Market 3 resolved: YES wins");
+        // } catch (error) {
+        //     console.log("Market 3 resolve error:", error);
+        // }
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Step 9: Players claim winnings (CLAIM command)
-        console.log("\n=== STEP 9: Players Claim Winnings (CLAIM) ===");
+        // console.log("\n=== STEP 9: Players Claim Winnings (CLAIM) ===");
         
-        // Each player claims from each market
+        // // Each player claims from each market
         const markets = [market1Id, market2Id, market3Id];
-        const players = [
-            { player: player1, name: "Player1" },
-            { player: player2, name: "Player2" },
-            { player: player3, name: "Player3" }
-        ];
+        // const players = [
+        //     { player: player1, name: "Player1" },
+        //     { player: player2, name: "Player2" },
+        //     { player: player3, name: "Player3" }
+        // ];
 
-        for (const marketId of markets) {
-            for (const { player, name } of players) {
-                try {
-                    await player.claimWinnings(marketId);
-                    console.log(`${name} claimed winnings from Market ${marketId}`);
-                } catch (error) {
-                    if (error instanceof Error && error.message === "NoWinningPosition") {
-                        console.log(`${name} has no winning position in Market ${marketId}`);
-                    } else {
-                        console.log(`${name} claim error for Market ${marketId}:`, error);
-                    }
-                }
-            }
-        }
+        // for (const marketId of markets) {
+        //     for (const { player, name } of players) {
+        //         try {
+        //             await player.claimWinnings(marketId);
+        //             console.log(`${name} claimed winnings from Market ${marketId}`);
+        //         } catch (error) {
+        //             if (error instanceof Error && error.message === "NoWinningPosition") {
+        //                 console.log(`${name} has no winning position in Market ${marketId}`);
+        //             } else {
+        //                 console.log(`${name} claim error for Market ${marketId}:`, error);
+        //             }
+        //         }
+        //     }
+        // }
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Step 10: Admin withdraws fees from all markets (WITHDRAW_FEES command)
         console.log("\n=== STEP 10: Admin Withdraws Fees (WITHDRAW_FEES) ===");
