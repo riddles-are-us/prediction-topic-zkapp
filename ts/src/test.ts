@@ -258,10 +258,10 @@ async function testMultiMarketPrediction() {
         // Market 1: Bitcoin price prediction
         console.log("Creating Market 1: Bitcoin Price Prediction");
         await admin.createMarket(
-            "Will Bitcoin reach $100K by end of 2024?",
+            "Will Bitcoin reach $130K by end of 2025?",
             0n,    // Start immediately (offset 0)
-            10000n,  // End after 50 counter ticks
-            10000n,  // Resolve after 50 counter ticks
+            100000n,  // End after 50 counter ticks
+            100000n,  // Resolve after 50 counter ticks
             1000000n, // 50K initial YES liquidity
             1000000n  // 50K initial NO liquidity
         );
@@ -273,8 +273,8 @@ async function testMultiMarketPrediction() {
         await admin.createMarket(
             "Will candidate A win the election?",
             0n,    // Start immediately (offset 0)
-            10000n,  // End after 50 counter ticks
-            10000n,  // Resolve after 50 counter ticks
+            50000n,  // End after 50 counter ticks
+            50000n,  // Resolve after 50 counter ticks
             1000000n, // 30K initial YES liquidity
             1000000n  // 70K initial NO liquidity (biased market)
         );
@@ -286,8 +286,8 @@ async function testMultiMarketPrediction() {
         await admin.createMarket(
             "Will Team X win the championship?",
             0n,    // Start immediately (offset 0)
-            10000n,  // End after 50 counter ticks
-            10000n,  // Resolve after 50 counter ticks
+            30000n,  // End after 50 counter ticks
+            30000n,  // Resolve after 50 counter ticks
             1000000n, // 25K initial YES liquidity
             1000000n  // 25K initial NO liquidity
         );
