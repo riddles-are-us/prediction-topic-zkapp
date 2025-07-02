@@ -151,11 +151,30 @@ class SanitySyncService {
     }
   }
 
+  // Install admin player (ignore if already exists)
+  async installAdminPlayer(): Promise<void> {
+    try {
+      console.log('🔧 Installing admin player...');
+      await this.adminPlayer.installPlayer();
+      console.log('✅ Admin player installed successfully');
+    } catch (error) {
+      if (error instanceof Error && error.message === "PlayerAlreadyExists") {
+        console.log('ℹ️  Admin player already exists, continuing...');
+      } else {
+        console.error('❌ Failed to install admin player:', error);
+        throw error;
+      }
+    }
+  }
+
   // Main sync function
   async syncMarkets(): Promise<void> {
     console.log('🚀 Starting Sanity-Backend market synchronization...\n');
 
     try {
+      // Install admin player first (ignore if already exists)
+      await this.installAdminPlayer();
+      
       // Fetch data from both sources
       const [sanityMarkets, backendMarkets] = await Promise.all([
         this.getSanityMarkets(),
