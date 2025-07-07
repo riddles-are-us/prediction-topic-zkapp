@@ -293,6 +293,21 @@ pub const NEW_PLAYER_INITIAL_BALANCE: u64 = 1000000; // Starting balance
 pub const ADMIN_PUBKEY: [u64; 4] = [...];      // Admin public key
 ```
 
+### Market Title Length Limits
+Due to command length restrictions in the zkWasm system, market titles have strict length limits:
+
+- **Maximum u64 count**: 9 (command format: `[cmd_type, ...title_data, start, end, resolution, yes_liq, no_liq]`)
+- **Maximum bytes**: 72 bytes (9 u64s × 8 bytes each)
+- **Typical character limit**: ~60-70 characters for English text (depends on UTF-8 encoding)
+
+**Examples:**
+- ✅ "Will Bitcoin reach $100K by 2024?" (38 chars, 38 bytes, 5 u64s)
+- ✅ "Apple Stock Price Prediction Q4 2024" (39 chars, 39 bytes, 5 u64s)
+- ✅ "Will the cryptocurrency market exceed all expectations this quarter?" (68 chars, 68 bytes, 9 u64s)
+- ❌ "Will the extremely long and detailed prediction about cryptocurrency market movements exceed expectations?" (102 chars, 102 bytes, 13 u64s)
+
+The system will automatically validate title length and reject transactions with overly long titles.
+
 ### Timing Configuration
 ```rust
 // Each counter tick represents 5 seconds
@@ -348,7 +363,6 @@ interface MarketData {
     marketId: string;
     title: string;
     titleString?: string;         // Human-readable title
-    description: string;
     startTime: string;
     endTime: string;
     resolutionTime: string;

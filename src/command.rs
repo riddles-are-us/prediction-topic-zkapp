@@ -281,11 +281,8 @@ impl Activity {
         let absolute_end_time = counter + end_time_offset;
         let absolute_resolution_time = counter + resolution_time_offset;
         
-        let description = format!("Prediction market created at counter {}", counter);
-        
         let _market_id = crate::state::MarketManager::create_market_with_title_u64_and_liquidity(
             title_u64_vec,
-            description,
             absolute_start_time,
             absolute_end_time,
             absolute_resolution_time,
@@ -336,6 +333,7 @@ pub fn decode_error(e: u32) -> &'static str {
         ERROR_INSUFFICIENT_BALANCE => "InsufficientBalance",
         ERROR_MARKET_ALREADY_RESOLVED => "MarketAlreadyResolved",
         ERROR_INVALID_MARKET_TIME => "InvalidMarketTime",
+        ERROR_INVALID_MARKET_TITLE => "InvalidMarketTitle",
         ERROR_INVALID_BET_TYPE => "InvalidBetType",
         ERROR_PLAYER_NOT_EXIST => "PlayerNotExist",
         ERROR_PLAYER_ALREADY_EXISTS => "PlayerAlreadyExists",

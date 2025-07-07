@@ -110,9 +110,8 @@ class Player extends PlayerConvention {
         let nonce = await this.getNonce();
         const titleU64Array = stringToU64Array(title);
         
-        // Build command: [cmd, title_len, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
+        // Build command: [cmd, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
         const params = [
-            BigInt(titleU64Array.length),
             ...titleU64Array,
             startTimeOffset,
             endTimeOffset,

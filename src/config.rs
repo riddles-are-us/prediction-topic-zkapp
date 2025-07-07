@@ -58,7 +58,6 @@ pub const FEE_BASIS_POINTS: u64 = 10000; // Same as BASIS_POINTS_PRECISION for f
 // Default market configuration
 pub struct DefaultMarketConfig {
     pub title: &'static str,
-    pub description: &'static str,
     pub start_time: u64,
     pub end_time: u64,
     pub resolution_time: u64,
@@ -69,7 +68,6 @@ pub struct DefaultMarketConfig {
 lazy_static::lazy_static! {
     pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
         title: "Bitcoin $100K by 2024",
-        description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
         start_time: 0,      // Start immediately (counter = 0)
         end_time: TICKS_PER_4_MONTHS,    // End after 4 months
         resolution_time: TICKS_PER_4_MONTHS, // Resolution time same as end time (4 months)

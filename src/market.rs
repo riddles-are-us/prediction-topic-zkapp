@@ -9,7 +9,6 @@ use crate::math_safe::*;
 #[derive(Serialize, Clone, Debug)]
 pub struct MarketData {
     pub title: Vec<u64>,  // Title encoded as Vec<u64> (8 bytes per u64)
-    pub description: String,
     pub start_time: u64,
     pub end_time: u64,
     pub resolution_time: u64,
@@ -29,13 +28,19 @@ pub struct MarketData {
 impl MarketData {
     pub fn new_with_title_u64_and_liquidity(
         title: Vec<u64>, 
-        description: String, 
         start_time: u64, 
         end_time: u64, 
         resolution_time: u64,
         initial_yes_liquidity: u64,
         initial_no_liquidity: u64
     ) -> Result<Self, u32> {
+        // 验证标题长度（命令长度限制）
+        // CreateMarket命令格式：[cmd_type, title_data..., start, end, resolution, yes_liq, no_liq]
+        // 总长度必须 < 16，所以 title_len < 10，最大值为9 (16 - 1 - 5 = 10)
+        if title.len() > 9 {
+            return Err(crate::error::ERROR_INVALID_MARKET_TITLE);
+        }
+        
         // 验证时间参数
         if start_time >= end_time {
             return Err(crate::error::ERROR_INVALID_MARKET_TIME);
@@ -50,7 +55,6 @@ impl MarketData {
         
         Ok(MarketData {
             title,
-            description,
             start_time,
             end_time,
             resolution_time,
@@ -424,7 +428,6 @@ impl StorageData for MarketData {
         
         MarketData {
             title,
-            description: "Prediction Market".to_string(),
             start_time: *u64data.next().unwrap(),
             end_time: *u64data.next().unwrap(),
             resolution_time: *u64data.next().unwrap(),

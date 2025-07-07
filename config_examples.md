@@ -7,7 +7,6 @@ This document shows how to customize different types of prediction markets in `s
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "Market Title",
-    description: "Market Description",
     start_time: start_time_in_ticks,
     end_time: end_time_in_ticks,
     resolution_time: resolution_time_in_ticks,
@@ -60,7 +59,6 @@ initial_no_liquidity: 800000,
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "BTC 1-Hour Price Movement",
-    description: "Will Bitcoin price go up in the next 1 hour?",
     start_time: 0,
     end_time: TICKS_PER_HOUR,        // 720 ticks
     resolution_time: TICKS_PER_HOUR,
@@ -74,7 +72,6 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "Bitcoin $100K by 2024",
-    description: "Will Bitcoin reach $100,000 USD by December 31, 2024?",
     start_time: 0,
     end_time: TICKS_PER_DAY,         // 17280 ticks
     resolution_time: TICKS_PER_DAY,
@@ -88,7 +85,6 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "ETH 2.0 Full Launch",
-    description: "Will Ethereum 2.0 fully launch within one week?",
     start_time: 0,
     end_time: TICKS_PER_DAY * 7,     // 120960 ticks
     resolution_time: TICKS_PER_DAY * 7,
@@ -102,7 +98,6 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "Stock Market Close Prediction",
-    description: "Will the stock market close higher today?",
     start_time: 0,
     end_time: TICKS_PER_HOUR * 8,        // Stop betting after 8 hours
     resolution_time: TICKS_PER_HOUR * 10, // Can only resolve after 10 hours
@@ -116,7 +111,6 @@ pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
 ```rust
 pub static ref DEFAULT_MARKET: DefaultMarketConfig = DefaultMarketConfig {
     title: "30-Minute Quick Prediction",
-    description: "Will event X happen in the next 30 minutes?",
     start_time: 0,
     end_time: DefaultMarketConfig::seconds_to_ticks(1800), // 30 minutes = 1800 seconds
     resolution_time: DefaultMarketConfig::seconds_to_ticks(1800),

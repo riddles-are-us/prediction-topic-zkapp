@@ -14,7 +14,6 @@ interface SanityMarket {
   _type: 'market';
   id: number;
   name: string;
-  description: string;
   landing?: {
     _type: 'image';
     asset: {
@@ -63,7 +62,6 @@ class SanitySyncService {
           _type,
           id,
           name,
-          description,
           landing,
           start,
           end,

@@ -102,7 +102,6 @@ export class IndexedObject {
 export class MarketData {
     marketId?: bigint;
     title: bigint[];
-    description: string;
     startTime: bigint;
     endTime: bigint;
     resolutionTime: bigint;
@@ -118,7 +117,6 @@ export class MarketData {
 
     constructor(data: any) {
         this.title = data.title || [];
-        this.description = data.description || "";
         this.startTime = data.startTime || 0n;
         this.endTime = data.endTime || 0n;
         this.resolutionTime = data.resolutionTime || 0n;
@@ -144,9 +142,6 @@ export class MarketData {
         const title = data.slice(index, index + titleLen);
         index += titleLen;
         
-        // Skip description for now as it's not in the u64 data
-        const description = "";
-        
         const startTime = data[index++];
         const endTime = data[index++];
         const resolutionTime = data[index++];
@@ -163,7 +158,6 @@ export class MarketData {
 
         const marketData = new MarketData({
             title,
-            description,
             startTime,
             endTime,
             resolutionTime,
@@ -210,7 +204,6 @@ export class LiquidityHistoryEntry {
 const marketObjectSchema = new mongoose.Schema({
     marketId: { type: BigInt, required: true, unique: true },
     title: { type: [BigInt], required: true },
-    description: { type: String, required: true },
     startTime: { type: BigInt, required: true },
     endTime: { type: BigInt, required: true },
     resolutionTime: { type: BigInt, required: true },
@@ -393,6 +386,25 @@ export function stringToU64Array(str: string): bigint[] {
     }
     
     return result;
+}
+
+// Market title length validation
+export function validateMarketTitleLength(title: string): { valid: boolean; message?: string; u64Count?: number } {
+    const u64Array = stringToU64Array(title);
+    const MAX_TITLE_U64_COUNT = 9; // Command length limit: 1 + title_len + 5 < 16, so title_len < 10, max value is 9
+    
+    if (u64Array.length > MAX_TITLE_U64_COUNT) {
+        return {
+            valid: false,
+            message: `Title too long: ${u64Array.length} u64s (max: ${MAX_TITLE_U64_COUNT}). Current title: "${title}" (${title.length} chars, ${new TextEncoder().encode(title).length} bytes)`,
+            u64Count: u64Array.length
+        };
+    }
+    
+    return {
+        valid: true,
+        u64Count: u64Array.length
+    };
 }
 
 

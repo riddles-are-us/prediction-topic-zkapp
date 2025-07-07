@@ -201,15 +201,17 @@ impl Transaction {
             enforce(params.len() == 2, "withdraw_fees needs 2 params");
             Command::Activity(Activity::WithdrawFees(params[1]))
         } else if command == CREATE_MARKET {
-            enforce(params.len() >= 7, "create_market needs at least 7 params");
-            let title_len = params[1] as usize;
-            enforce(params.len() == 2 + title_len + 5, "create_market param length mismatch");
-            let title_u64_vec = params[2..2+title_len].to_vec();
-            let start_time = params[2+title_len];
-            let end_time = params[2+title_len+1];
-            let resolution_time = params[2+title_len+2];
-            let yes_liquidity = params[2+title_len+3];
-            let no_liquidity = params[2+title_len+4];
+            enforce(params.len() >= 5, "create_market needs at least 5 params");
+            // Calculate title length: total_params - 5 (other params) = title_len
+            // params = [title_data..., start_time, end_time, resolution_time, yes_liquidity, no_liquidity]
+            let title_len = params.len() - 5;
+            enforce(title_len <= 9, "create_market title too long");
+            let title_u64_vec = params[0..title_len].to_vec();
+            let start_time = params[title_len];
+            let end_time = params[title_len+1];
+            let resolution_time = params[title_len+2];
+            let yes_liquidity = params[title_len+3];
+            let no_liquidity = params[title_len+4];
             Command::Activity(Activity::CreateMarket(title_u64_vec, start_time, end_time, resolution_time, yes_liquidity, no_liquidity))
         } else if command == INSTALL_PLAYER {
             Command::InstallPlayer
@@ -360,7 +362,6 @@ impl MarketManager {
 
     pub fn create_market_with_title_u64_and_liquidity(
         title_u64_vec: Vec<u64>, 
-        description: String, 
         start_time: u64, 
         end_time: u64, 
         resolution_time: u64,
@@ -369,7 +370,6 @@ impl MarketManager {
     ) -> Result<u64, u32> {
         let market = MarketData::new_with_title_u64_and_liquidity(
             title_u64_vec, 
-            description, 
             start_time, 
             end_time, 
             resolution_time,

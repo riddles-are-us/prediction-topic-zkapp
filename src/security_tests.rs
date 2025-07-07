@@ -291,7 +291,6 @@ mod market_safe_tests {
         let title = MarketData::string_to_u64_vec("Test Market");
         MarketData::new_with_title_u64_and_liquidity(
             title,
-            "Test Description".to_string(),
             0,
             1000,
             1000,
@@ -305,7 +304,6 @@ mod market_safe_tests {
         let title = MarketData::string_to_u64_vec("Test Market");
         let market = MarketData::new_with_title_u64_and_liquidity(
             title,
-            "Test Description".to_string(),
             0,
             1000,
             1000,
@@ -428,7 +426,6 @@ mod market_safe_tests {
         let title = MarketData::string_to_u64_vec("Custom Liquidity Market");
         let market = MarketData::new_with_title_u64_and_liquidity(
             title,
-            "Market with custom liquidity".to_string(),
             0,
             1000,
             1000,

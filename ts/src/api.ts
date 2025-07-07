@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import { PlayerConvention, ZKWasmAppRpc, createCommand } from "zkwasm-minirollup-rpc";
 import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
-import { stringToU64Array } from "./models.js";
+import { stringToU64Array, validateMarketTitleLength } from "./models.js";
 
 export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
@@ -97,12 +97,17 @@ export class Player extends PlayerConvention {
         yesLiquidity: bigint,
         noLiquidity: bigint
     ) {
+        // Validate title length before creating market
+        const titleValidation = validateMarketTitleLength(title);
+        if (!titleValidation.valid) {
+            throw new Error(titleValidation.message);
+        }
+        
         let nonce = await this.getNonce();
         const titleU64Array = stringToU64Array(title);
         
-        // Build command: [cmd, title_len, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
+        // Build command: [cmd, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
         const params = [
-            BigInt(titleU64Array.length),
             ...titleU64Array,
             startTimeOffset,
             endTimeOffset,
@@ -133,7 +138,6 @@ export interface MarketData {
     marketId: string;
     title: string;
     titleString?: string; // Converted from u64 array to string
-    description: string;
     startTime: string;
     endTime: string;
     resolutionTime: string;
@@ -411,11 +415,16 @@ export function buildCreateMarketTransaction(
     yesLiquidity: bigint,
     noLiquidity: bigint
 ): bigint[] {
+    // Validate title length before creating transaction
+    const titleValidation = validateMarketTitleLength(title);
+    if (!titleValidation.valid) {
+        throw new Error(titleValidation.message);
+    }
+    
     const titleU64Array = stringToU64Array(title);
     return [
         BigInt(nonce),
         BigInt(CREATE_MARKET),
-        BigInt(titleU64Array.length),
         ...titleU64Array,
         startTimeOffset,
         endTimeOffset,
