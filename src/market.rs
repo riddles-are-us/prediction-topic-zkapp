@@ -16,6 +16,10 @@ pub struct MarketData {
     pub total_yes_shares: u64,
     pub total_no_shares: u64,
 
+    // Initial virtual liquidity (used for pricing, but not backed by tokens)
+    pub initial_yes_liquidity: u64,
+    pub initial_no_liquidity: u64,
+
     // LMSR liquidity parameter b (market depth)
     pub b: u64,
 
@@ -62,6 +66,8 @@ impl MarketData {
             // Virtual liquidity for AMM pricing
             total_yes_shares: initial_yes_liquidity,
             total_no_shares:  initial_no_liquidity,
+            initial_yes_liquidity,
+            initial_no_liquidity,
             b: b,
             pool_balance: 0,
             total_volume: 0,
@@ -360,17 +366,41 @@ impl MarketData {
         match self.outcome {
             Some(true) => {
                 // YES 获胜
-                if self.total_yes_shares == 0 {
-                    return Ok(0);
+                // Only consider purchased shares (exclude initial virtual liquidity)
+                // For backward compatibility: if initial liquidity is 0, assume old market format
+                if self.initial_yes_liquidity == 0 && self.initial_no_liquidity == 0 {
+                    // Old market format - use total shares (incorrect but maintains compatibility)
+                    if self.total_yes_shares == 0 {
+                        return Ok(0);
+                    }
+                    safe_div_high_precision(yes_shares, self.pool_balance, self.total_yes_shares)
+                } else {
+                    // New market format - exclude virtual liquidity
+                    let purchased_yes_shares = safe_sub(self.total_yes_shares, self.initial_yes_liquidity)?;
+                    if purchased_yes_shares == 0 {
+                        return Ok(0);
+                    }
+                    safe_div_high_precision(yes_shares, self.pool_balance, purchased_yes_shares)
                 }
-                safe_div_high_precision(yes_shares, self.pool_balance, self.total_yes_shares)
             },
             Some(false) => {
                 // NO 获胜
-                if self.total_no_shares == 0 {
-                    return Ok(0);
+                // Only consider purchased shares (exclude initial virtual liquidity)
+                // For backward compatibility: if initial liquidity is 0, assume old market format
+                if self.initial_yes_liquidity == 0 && self.initial_no_liquidity == 0 {
+                    // Old market format - use total shares (incorrect but maintains compatibility)
+                    if self.total_no_shares == 0 {
+                        return Ok(0);
+                    }
+                    safe_div_high_precision(no_shares, self.pool_balance, self.total_no_shares)
+                } else {
+                    // New market format - exclude virtual liquidity
+                    let purchased_no_shares = safe_sub(self.total_no_shares, self.initial_no_liquidity)?;
+                    if purchased_no_shares == 0 {
+                        return Ok(0);
+                    }
+                    safe_div_high_precision(no_shares, self.pool_balance, purchased_no_shares)
                 }
-                safe_div_high_precision(no_shares, self.pool_balance, self.total_no_shares)
             },
             None => Ok(0),
         }
@@ -388,23 +418,43 @@ impl MarketData {
 
 impl StorageData for MarketData {
     fn from_data(u64data: &mut std::slice::IterMut<u64>) -> Self {
+        let start_time = *u64data.next().unwrap();
+        let end_time = *u64data.next().unwrap();
+        let resolution_time = *u64data.next().unwrap();
+        let total_yes_shares = *u64data.next().unwrap();
+        let total_no_shares = *u64data.next().unwrap();
+        
+        // Try to read initial liquidity fields (new format)
+        // If they don't exist (old format), we'll use 0 and handle in calculate_payout
+        let initial_yes_liquidity = u64data.next().copied().unwrap_or(0);
+        let initial_no_liquidity = u64data.next().copied().unwrap_or(0);
+        
+        let b = *u64data.next().unwrap();
+        let pool_balance = *u64data.next().unwrap();
+        let total_volume = *u64data.next().unwrap();
+        let resolved = *u64data.next().unwrap() != 0;
+        let outcome = {
+            let outcome_val = *u64data.next().unwrap();
+            if outcome_val == 0 { None }
+            else if outcome_val == 1 { Some(false) }
+            else { Some(true) }
+        };
+        let total_fees_collected = *u64data.next().unwrap();
+        
         MarketData {
-            start_time: *u64data.next().unwrap(),
-            end_time: *u64data.next().unwrap(),
-            resolution_time: *u64data.next().unwrap(),
-            total_yes_shares: *u64data.next().unwrap(),
-            total_no_shares: *u64data.next().unwrap(),
-            b: *u64data.next().unwrap(),
-            pool_balance: *u64data.next().unwrap(),
-            total_volume: *u64data.next().unwrap(),
-            resolved: *u64data.next().unwrap() != 0,
-            outcome: {
-                let outcome_val = *u64data.next().unwrap();
-                if outcome_val == 0 { None }
-                else if outcome_val == 1 { Some(false) }
-                else { Some(true) }
-            },
-            total_fees_collected: *u64data.next().unwrap(),
+            start_time,
+            end_time,
+            resolution_time,
+            total_yes_shares,
+            total_no_shares,
+            initial_yes_liquidity,
+            initial_no_liquidity,
+            b,
+            pool_balance,
+            total_volume,
+            resolved,
+            outcome,
+            total_fees_collected,
         }
     }
 
@@ -414,6 +464,8 @@ impl StorageData for MarketData {
         data.push(self.resolution_time);
         data.push(self.total_yes_shares);
         data.push(self.total_no_shares);
+        data.push(self.initial_yes_liquidity);
+        data.push(self.initial_no_liquidity);
         data.push(self.b);
         data.push(self.pool_balance);
         data.push(self.total_volume);

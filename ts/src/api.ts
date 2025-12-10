@@ -144,6 +144,8 @@ export interface MarketData {
     resolutionTime: string;
     totalYesShares: string;
     totalNoShares: string;
+    initialYesLiquidity: string;
+    initialNoLiquidity: string;
     b: string;              // LMSR liquidity parameter
     poolBalance: string;    // Collateral in the LMSR market
     totalVolume: string;

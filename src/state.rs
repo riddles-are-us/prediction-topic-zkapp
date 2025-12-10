@@ -224,6 +224,8 @@ impl Transaction {
         use crate::player::Player;
         use crate::error::{ERROR_PLAYER_ALREADY_EXISTS};
         use crate::config::NEW_PLAYER_INITIAL_BALANCE;
+        use crate::event::{insert_event};
+        use crate::event::EVENT_PLAYER_UPDATE;
         
         let player_id = Player::pkey_to_pid(pkey);
         let player = Player::get_from_pid(&player_id);
@@ -234,6 +236,17 @@ impl Transaction {
                 // Set initial balance for new player
                 player.data.balance = NEW_PLAYER_INITIAL_BALANCE;
                 player.store();
+                
+                // Emit event for player installation
+                let counter = GLOBAL_STATE.0.borrow().counter;
+                let mut data = vec![
+                    player_id[0],
+                    player_id[1],
+                    NEW_PLAYER_INITIAL_BALANCE,
+                    counter,
+                ];
+                insert_event(EVENT_PLAYER_UPDATE, &mut data);
+                
                 Ok(())
             }
         }
@@ -249,7 +262,7 @@ impl Transaction {
             
             (new_counter, market_ids)
         }; // global_state is dropped here
-        
+    
         // Emit shares history for each market at this counter
         // Note: Market IndexedObject events are emitted directly during operations (bet, sell, resolve)
         for market_id in market_ids {
@@ -262,6 +275,10 @@ impl Transaction {
                 );
             }
         }
+        // let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        // global_state.counter += 1;
+        // Note: Event emissions removed from tick() to prevent zk proof failures in production
+        // Liquidity history tracking should be handled externally if needed
     }
 
     pub fn inc_tx_number(&self) {

@@ -151,6 +151,15 @@ async function main() {
     }
     await delay(3000);
 
+        
+    // Resolve Market 2: NO wins
+    try {
+      await adminPlayer.resolveMarket(marketId, false); // NO outcome
+      console.log("Market 2 resolved: NO wins");
+    } catch (error) {
+      console.log("Market 2 resolve error:", error);
+    }
+
     // Step 6: Check updated market state
     console.log("\n6. Checking updated market state...");
     const updatedMarket = await api.getMarket(testMarket.marketId);
@@ -172,6 +181,42 @@ async function main() {
     const prices = api.calculatePrices(yesShares, noShares, updatedMarketB);
     console.log(`    Current prices (LMSR): YES=${(prices.yesPrice * 100).toFixed(2)}%, NO=${(prices.noPrice * 100).toFixed(2)}%`);
     await delay(1000);
+
+    
+
+    console.log("-------------------------------------------------------------");
+    let player1State = await player1.getState();
+    console.log("Player1 state:", player1State);
+    let player2State = await player2.getState();
+    console.log("Player2 state:", player2State);
+
+    try {
+      await player1.claimWinnings(marketId);
+      console.log(`Player1 claimed winnings from Market ${marketId}`);
+    } catch (error) {
+        if (error instanceof Error && error.message === "NoWinningPosition") {
+            console.log(`Player1 has no winning position in Market ${marketId}`);
+        } else {
+            console.log(`Player1 claim error for Market ${marketId}:`, error);
+        }
+    }
+
+    try {
+      await player2.claimWinnings(marketId);
+      console.log(`Player2 claimed winnings from Market ${marketId}`);
+    } catch (error) {
+        if (error instanceof Error && error.message === "NoWinningPosition") {
+            console.log(`Player2 has no winning position in Market ${marketId}`);
+        } else {
+            console.log(`Player2 claim error for Market ${marketId}:`, error);
+        }
+    }
+
+    console.log("-------------------------------------------------------------");
+    player1State = await player1.getState();
+    console.log("Player1 state:", player1State);
+    player2State = await player2.getState();
+    console.log("Player2 state:", player2State);
 
     // Step 8: Check player positions
     console.log("\n8. Checking player positions...");
