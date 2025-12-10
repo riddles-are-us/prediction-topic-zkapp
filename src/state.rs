@@ -201,18 +201,15 @@ impl Transaction {
             enforce(params.len() == 2, "withdraw_fees needs 2 params");
             Command::Activity(Activity::WithdrawFees(params[1]))
         } else if command == CREATE_MARKET {
-            enforce(params.len() >= 5, "create_market needs at least 5 params");
-            // Calculate title length: total_params - 5 (other params) = title_len
-            // params = [title_data..., start_time, end_time, resolution_time, yes_liquidity, no_liquidity]
-            let title_len = params.len() - 5;
-            enforce(title_len <= 9, "create_market title too long");
-            let title_u64_vec = params[0..title_len].to_vec();
-            let start_time = params[title_len];
-            let end_time = params[title_len+1];
-            let resolution_time = params[title_len+2];
-            let yes_liquidity = params[title_len+3];
-            let no_liquidity = params[title_len+4];
-            Command::Activity(Activity::CreateMarket(title_u64_vec, start_time, end_time, resolution_time, yes_liquidity, no_liquidity))
+            enforce(params.len() == 7, "create_market needs exactly 7 params");
+            // params[0] = command byte, params[1-6] = actual parameters
+            let start_time = params[1];
+            let end_time = params[2];
+            let resolution_time = params[3];
+            let yes_liquidity = params[4];
+            let no_liquidity = params[5];
+            let b = params[6];
+            Command::Activity(Activity::CreateMarket(start_time, end_time, resolution_time, yes_liquidity, no_liquidity, b))
         } else if command == INSTALL_PLAYER {
             Command::InstallPlayer
         } else {
@@ -227,6 +224,8 @@ impl Transaction {
         use crate::player::Player;
         use crate::error::{ERROR_PLAYER_ALREADY_EXISTS};
         use crate::config::NEW_PLAYER_INITIAL_BALANCE;
+        use crate::event::{insert_event};
+        use crate::event::EVENT_PLAYER_UPDATE;
         
         let player_id = Player::pkey_to_pid(pkey);
         let player = Player::get_from_pid(&player_id);
@@ -237,6 +236,17 @@ impl Transaction {
                 // Set initial balance for new player
                 player.data.balance = NEW_PLAYER_INITIAL_BALANCE;
                 player.store();
+                
+                // Emit event for player installation
+                let counter = GLOBAL_STATE.0.borrow().counter;
+                let mut data = vec![
+                    player_id[0],
+                    player_id[1],
+                    NEW_PLAYER_INITIAL_BALANCE,
+                    counter,
+                ];
+                insert_event(EVENT_PLAYER_UPDATE, &mut data);
+                
                 Ok(())
             }
         }
@@ -252,19 +262,23 @@ impl Transaction {
             
             (new_counter, market_ids)
         }; // global_state is dropped here
-        
-        // Emit liquidity history for each market at this counter
+    
+        // Emit shares history for each market at this counter
         // Note: Market IndexedObject events are emitted directly during operations (bet, sell, resolve)
         for market_id in market_ids {
             if let Some(market) = MarketManager::get_market(market_id) {
                 emit_liquidity_history(
                     market_id,
                     new_counter,
-                    market.yes_liquidity,
-                    market.no_liquidity
+                    market.total_yes_shares,
+                    market.total_no_shares
                 );
             }
         }
+        // let mut global_state = GLOBAL_STATE.0.borrow_mut();
+        // global_state.counter += 1;
+        // Note: Event emissions removed from tick() to prevent zk proof failures in production
+        // Liquidity history tracking should be handled externally if needed
     }
 
     pub fn inc_tx_number(&self) {
@@ -360,21 +374,21 @@ impl MarketManager {
         Self::store_market(market_id, market);
     }
 
-    pub fn create_market_with_title_u64_and_liquidity(
-        title_u64_vec: Vec<u64>, 
-        start_time: u64, 
-        end_time: u64, 
+    pub fn create_market_with_liquidity(
+        start_time: u64,
+        end_time: u64,
         resolution_time: u64,
         initial_yes_liquidity: u64,
-        initial_no_liquidity: u64
+        initial_no_liquidity: u64,
+        b: u64
     ) -> Result<u64, u32> {
-        let market = MarketData::new_with_title_u64_and_liquidity(
-            title_u64_vec, 
-            start_time, 
-            end_time, 
+        let market = MarketData::new_with_liquidity(
+            start_time,
+            end_time,
             resolution_time,
             initial_yes_liquidity,
-            initial_no_liquidity
+            initial_no_liquidity,
+            b
         )?;
         
         let market_id = {

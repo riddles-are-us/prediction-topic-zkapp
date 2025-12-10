@@ -1,7 +1,16 @@
 import fetch from 'node-fetch';
 import { PlayerConvention, ZKWasmAppRpc, createCommand } from "zkwasm-minirollup-rpc";
 import { get_server_admin_key } from "zkwasm-ts-server/src/config.js";
-import { stringToU64Array, validateMarketTitleLength } from "./models.js";
+import {
+    FP_SCALE,
+    MAX_SHARES,
+    lmsrBuyNoQuote,
+    lmsrBuyYesQuote,
+    lmsrPriceNoFp,
+    lmsrPriceYesFp,
+    lmsrSellNoQuote,
+    lmsrSellYesQuote
+} from "./lmsr_math.js";
 
 export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
@@ -88,34 +97,28 @@ export class Player extends PlayerConvention {
         return await this.sendTransactionWithCommand(cmd);
     }
 
-    // Create markets with relative time offsets
+    // Create markets with relative time offsets (LMSR)
+    // Note: Title should be managed in Sanity CMS, not in smart contract
     async createMarket(
-        title: string,
         startTimeOffset: bigint,    // Offset from current counter
         endTimeOffset: bigint,      // Offset from current counter
         resolutionTimeOffset: bigint, // Offset from current counter
-        yesLiquidity: bigint,
-        noLiquidity: bigint
+        initialYesLiquidity: bigint, // Initial YES shares for LMSR
+        initialNoLiquidity: bigint,  // Initial NO shares for LMSR
+        b: bigint                    // LMSR liquidity parameter (market depth)
     ) {
-        // Validate title length before creating market
-        const titleValidation = validateMarketTitleLength(title);
-        if (!titleValidation.valid) {
-            throw new Error(titleValidation.message);
-        }
-        
         let nonce = await this.getNonce();
-        const titleU64Array = stringToU64Array(title);
-        
-        // Build command: [cmd, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
+
+        // Build command: [start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity, b]
         const params = [
-            ...titleU64Array,
             startTimeOffset,
             endTimeOffset,
             resolutionTimeOffset,
-            yesLiquidity,
-            noLiquidity
+            initialYesLiquidity,
+            initialNoLiquidity,
+            b
         ];
-        
+
         let cmd = createCommand(nonce, BigInt(CREATE_MARKET), params);
         return await this.sendTransactionWithCommand(cmd);
     }
@@ -133,23 +136,23 @@ export class Player extends PlayerConvention {
     }
 }
 
-// Updated interfaces for multi-market support
+// Updated interfaces for multi-market support (LMSR)
 export interface MarketData {
     marketId: string;
-    title: string;
-    titleString?: string; // Converted from u64 array to string
     startTime: string;
     endTime: string;
     resolutionTime: string;
-    yesLiquidity: string;
-    noLiquidity: string;
-    prizePool: string;
-    totalVolume: string;
     totalYesShares: string;
     totalNoShares: string;
+    initialYesLiquidity: string;
+    initialNoLiquidity: string;
+    b: string;              // LMSR liquidity parameter
+    poolBalance: string;    // Collateral in the LMSR market
+    totalVolume: string;
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: string;
+    titleString?: string; // From Sanity CMS, not stored in smart contract
 }
 
 export interface TransactionData {
@@ -268,91 +271,114 @@ export class PredictionMarketAPI {
         return result.data;
     }
 
-    // Calculation functions updated for specific market
-    calculateShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
+    // Binary search to find shares for a given bet amount (LMSR)
+    // Matches Rust backend's calculate_shares implementation exactly
+    calculateShares(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): bigint {
         const betAmount = BigInt(amount);
         const fee = (betAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netAmount = betAmount - fee;
         
-        // AMM calculation: k = x * y
-        const k = yesLiquidity * noLiquidity;
+        const qYes = BigInt(yesLiquidity);
+        const qNo = BigInt(noLiquidity);
+        const bBig = BigInt(b);
         
-        if (betType === 1) { // YES bet
-            const newNoLiquidity = noLiquidity + netAmount;
-            const newYesLiquidity = k / newNoLiquidity;
-            return yesLiquidity - newYesLiquidity;
-        } else { // NO bet
-            const newYesLiquidity = yesLiquidity + netAmount;
-            const newNoLiquidity = k / newYesLiquidity;
-            return noLiquidity - newNoLiquidity;
+        let lo = 0n;
+        let hi = MAX_SHARES;
+        
+        while (lo < hi) {
+            const mid = lo + (hi - lo + 1n) / 2n;
+            let quote: bigint;
+            
+            try {
+                quote = betType === 1
+                    ? lmsrBuyYesQuote(qYes, qNo, bBig, mid)
+                    : lmsrBuyNoQuote(qYes, qNo, bBig, mid);
+            } catch {
+                hi = mid - 1n;
+                continue;
+            }
+            
+            const quoteTokens = quote / FP_SCALE;
+            if (quoteTokens <= netAmount) {
+                lo = mid;
+            } else {
+                hi = mid - 1n;
+            }
         }
+        
+        if (lo === 0n) {
+            try {
+                const singleQuote = betType === 1
+                    ? lmsrBuyYesQuote(qYes, qNo, bBig, 1n)
+                    : lmsrBuyNoQuote(qYes, qNo, bBig, 1n);
+                const singleTokens = singleQuote / FP_SCALE;
+                if (singleTokens > netAmount) {
+                    return 0n;
+                }
+                lo = 1n;
+            } catch {
+                return 0n;
+            }
+        }
+        
+        return lo;
     }
 
-    calculateSellDetails(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): { netPayout: bigint, fee: bigint } {
+    calculateSellDetails(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): { netPayout: bigint, fee: bigint } {
         const sharesToSell = BigInt(shares);
+        const qYes = BigInt(yesLiquidity);
+        const qNo = BigInt(noLiquidity);
+        const bBig = BigInt(b);
         
-        // AMM calculation for selling
-        const k = yesLiquidity * noLiquidity;
-        
-        let grossAmount: bigint;
-        if (sellType === 1) { // Selling YES shares
-            const newYesLiquidity = yesLiquidity + sharesToSell;
-            const newNoLiquidity = k / newYesLiquidity;
-            grossAmount = noLiquidity - newNoLiquidity;
-        } else { // Selling NO shares
-            const newNoLiquidity = noLiquidity + sharesToSell;
-            const newYesLiquidity = k / newNoLiquidity;
-            grossAmount = yesLiquidity - newYesLiquidity;
+        let grossQuote: bigint;
+        if (sellType === 1) {
+            grossQuote = lmsrSellYesQuote(qYes, qNo, bBig, sharesToSell);
+        } else {
+            grossQuote = lmsrSellNoQuote(qYes, qNo, bBig, sharesToSell);
         }
         
+        const grossAmount = grossQuote / FP_SCALE;
         const fee = (grossAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
         const netPayout = grossAmount - fee;
         
         return { netPayout, fee };
     }
 
-    calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): bigint {
-        const result = this.calculateSellDetails(sellType, shares, yesLiquidity, noLiquidity);
+    calculateSellValue(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): bigint {
+        const result = this.calculateSellDetails(sellType, shares, yesLiquidity, noLiquidity, b);
         return result.netPayout;
     }
 
-    getBuyPrice(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity);
+    getBuyPrice(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): number {
+        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity, b);
         if (shares === 0n) return 0;
         return (amount * 1000000) / Number(shares); // Return price in terms of precision
     }
 
-    getSellPrice(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        const payout = this.calculateSellValue(sellType, shares, yesLiquidity, noLiquidity);
+    getSellPrice(sellType: number, shares: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): number {
+        const payout = this.calculateSellValue(sellType, shares, yesLiquidity, noLiquidity, b);
         if (shares === 0) return 0;
         return (Number(payout) * 1000000) / shares; // Return price in terms of precision
     }
 
-    calculateMarketImpact(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): { 
+    calculateMarketImpact(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): { 
         currentYesPrice: number, 
         currentNoPrice: number, 
         newYesPrice: number, 
         newNoPrice: number 
     } {
-        const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity);
+        const currentPrices = this.calculatePrices(yesLiquidity, noLiquidity, b);
+        const shares = this.calculateShares(betType, amount, yesLiquidity, noLiquidity, b);
         
-        // Calculate new liquidity after bet
-        const betAmount = BigInt(amount);
-        const fee = (betAmount * PLATFORM_FEE_RATE + FEE_BASIS_POINTS - 1n) / FEE_BASIS_POINTS;
-        const netAmount = betAmount - fee;
-        
-        const k = yesLiquidity * noLiquidity;
-        
-        let newYesLiquidity: bigint, newNoLiquidity: bigint;
-        if (betType === 1) { // YES bet
-            newNoLiquidity = noLiquidity + netAmount;
-            newYesLiquidity = k / newNoLiquidity;
-        } else { // NO bet
-            newYesLiquidity = yesLiquidity + netAmount;
-            newNoLiquidity = k / newYesLiquidity;
+        let newYesLiquidity: bigint = yesLiquidity;
+        let newNoLiquidity: bigint = noLiquidity;
+        if (betType === 1) {
+            newYesLiquidity = yesLiquidity + shares;
+        } else {
+            newNoLiquidity = noLiquidity + shares;
         }
         
-        const newPrices = this.calculatePrices(newYesLiquidity, newNoLiquidity);
+        const newPrices = this.calculatePrices(newYesLiquidity, newNoLiquidity, b);
         
         return {
             currentYesPrice: currentPrices.yesPrice,
@@ -362,8 +388,8 @@ export class PredictionMarketAPI {
         };
     }
 
-    calculateSlippage(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint): number {
-        const impact = this.calculateMarketImpact(betType, amount, yesLiquidity, noLiquidity);
+    calculateSlippage(betType: number, amount: number, yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): number {
+        const impact = this.calculateMarketImpact(betType, amount, yesLiquidity, noLiquidity, b);
         
         if (betType === 1) { // YES bet
             return ((impact.newYesPrice - impact.currentYesPrice) / impact.currentYesPrice) * 100;
@@ -372,14 +398,17 @@ export class PredictionMarketAPI {
         }
     }
 
-    calculatePrices(yesLiquidity: bigint, noLiquidity: bigint): { yesPrice: number, noPrice: number } {
-        const totalLiquidity = yesLiquidity + noLiquidity;
-        if (totalLiquidity === 0n) {
+    calculatePrices(yesLiquidity: bigint, noLiquidity: bigint, b: bigint = 1000000n): { yesPrice: number, noPrice: number } {
+        const qYes = BigInt(yesLiquidity);
+        const qNo = BigInt(noLiquidity);
+        const bBig = BigInt(b);
+        
+        if (qYes === 0n && qNo === 0n) {
             return { yesPrice: 0.5, noPrice: 0.5 };
         }
         
-        const yesPrice = Number(noLiquidity) / Number(totalLiquidity);
-        const noPrice = Number(yesLiquidity) / Number(totalLiquidity);
+        const yesPrice = Number(lmsrPriceYesFp(qYes, qNo, bBig)) / Number(FP_SCALE);
+        const noPrice = Number(lmsrPriceNoFp(qYes, qNo, bBig)) / Number(FP_SCALE);
         
         return { yesPrice, noPrice };
     }
@@ -408,29 +437,22 @@ export function buildWithdrawFeesTransaction(nonce: number, marketId: bigint): b
 
 export function buildCreateMarketTransaction(
     nonce: number,
-    title: string,
     startTimeOffset: bigint,     // Offset from current counter
     endTimeOffset: bigint,       // Offset from current counter
     resolutionTimeOffset: bigint, // Offset from current counter
-    yesLiquidity: bigint,
-    noLiquidity: bigint
+    initialYesLiquidity: bigint, // Initial YES shares for LMSR
+    initialNoLiquidity: bigint,  // Initial NO shares for LMSR
+    b: bigint                    // LMSR liquidity parameter
 ): bigint[] {
-    // Validate title length before creating transaction
-    const titleValidation = validateMarketTitleLength(title);
-    if (!titleValidation.valid) {
-        throw new Error(titleValidation.message);
-    }
-    
-    const titleU64Array = stringToU64Array(title);
     return [
         BigInt(nonce),
         BigInt(CREATE_MARKET),
-        ...titleU64Array,
         startTimeOffset,
         endTimeOffset,
         resolutionTimeOffset,
-        yesLiquidity,
-        noLiquidity
+        initialYesLiquidity,
+        initialNoLiquidity,
+        b
     ];
 }
 

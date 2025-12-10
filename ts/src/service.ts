@@ -2,7 +2,7 @@ import { Express } from "express";
 import mongoose from 'mongoose';
 import { Event, EventModel, Service, TxStateManager, TxWitness } from "zkwasm-ts-server";
 import { merkleRootToBeHexString } from "zkwasm-ts-server/src/lib.js";
-import { BetEvent, BetModel, docToJSON, IndexedObject, LiquidityHistoryModel, MarketModel, PlayerMarketPositionModel, u64ArrayToString } from "./models.js";
+import { BetEvent, BetModel, docToJSON, IndexedObject, LiquidityHistoryModel, MarketModel, PlayerMarketPositionModel, PlayerActionEventParser, PlayerActionEventModel, PlayerActionType } from "./models.js";
 
 const service = new Service(eventCallback, batchedCallback, extra);
 await service.initialize();
@@ -14,15 +14,8 @@ function extra(app: Express) {
   app.get("/data/markets", async (req: any, res) => {
     try {
       const doc = await MarketModel.find({}).sort({ marketId: 1 });
-      let data = doc.map((d) => {
-        const market = docToJSON(d);
-        // Convert title from u64 array to string
-        if (market.title && Array.isArray(market.title)) {
-          market.titleString = u64ArrayToString(market.title);
-        }
-        return market;
-      });
-      res.status(200).send({
+      let data = doc.map((d) => docToJSON(d));
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -50,12 +43,8 @@ function extra(app: Express) {
       }
       
       const market = docToJSON(doc);
-      // Convert title from u64 array to string
-      if (market.title && Array.isArray(market.title)) {
-        market.titleString = u64ArrayToString(market.title);
-      }
-      
-      res.status(200).send({
+
+      res.status(201).send({
         success: true,
         data: market,
       });
@@ -90,7 +79,7 @@ function extra(app: Express) {
         return transaction;
       });
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -128,7 +117,7 @@ function extra(app: Express) {
         return transaction;
       });
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -168,7 +157,7 @@ function extra(app: Express) {
         return transaction;
       });
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -207,7 +196,7 @@ function extra(app: Express) {
         };
       }
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -232,7 +221,7 @@ function extra(app: Express) {
       
       let data = doc.map((d) => docToJSON(d));
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data,
       });
@@ -267,7 +256,7 @@ function extra(app: Express) {
         };
       });
       
-      res.status(200).send({
+      res.status(201).send({
         success: true,
         data: data.reverse(), // Return in ascending order
       });
@@ -280,11 +269,270 @@ function extra(app: Express) {
     }
   });
 
+  // === Player Action Event Endpoints ===
+
+  // Get player install events
+  app.get("/data/events/player/install/:pid1?/:pid2?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = { actionType: PlayerActionType.INSTALL_PLAYER };
+      if (pid1 !== null && pid2 !== null) {
+        query.pid = [pid1, pid2];
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching player install events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player install events"
+      });
+    }
+  });
+
+  // Get withdraw events
+  app.get("/data/events/player/withdraw/:pid1?/:pid2?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = { actionType: PlayerActionType.WITHDRAW };
+      if (pid1 !== null && pid2 !== null) {
+        query.pid = [pid1, pid2];
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching withdraw events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch withdraw events"
+      });
+    }
+  });
+
+  // Get deposit events
+  app.get("/data/events/player/deposit/:pid1?/:pid2?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = { actionType: PlayerActionType.DEPOSIT };
+      if (pid1 !== null && pid2 !== null) {
+        query.$or = [
+          { pid: [pid1, pid2] },
+          { targetPid: [pid1, pid2] }
+        ];
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching deposit events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch deposit events"
+      });
+    }
+  });
+
+  // Get claim events
+  app.get("/data/events/player/claim/:pid1?/:pid2?/:marketId?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const marketId = req.params.marketId ? BigInt(req.params.marketId) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = { actionType: PlayerActionType.CLAIM };
+      if (pid1 !== null && pid2 !== null) {
+        query.pid = [pid1, pid2];
+      }
+      if (marketId !== null) {
+        query.marketId = marketId;
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching claim events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch claim events"
+      });
+    }
+  });
+
+  // Get claim events by market (alternative route)
+  app.get("/data/events/player/claim/market/:marketId/:count?", async (req: any, res) => {
+    try {
+      const marketId = BigInt(req.params.marketId);
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const doc = await PlayerActionEventModel.find({
+        actionType: PlayerActionType.CLAIM,
+        marketId: marketId
+      })
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching claim events by market:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch claim events by market"
+      });
+    }
+  });
+
+  // Get withdraw fees events
+  app.get("/data/events/player/withdraw-fees/:pid1?/:pid2?/:marketId?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const marketId = req.params.marketId ? BigInt(req.params.marketId) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = { actionType: PlayerActionType.WITHDRAW_FEES };
+      if (pid1 !== null && pid2 !== null) {
+        query.pid = [pid1, pid2];
+      }
+      if (marketId !== null) {
+        query.marketId = marketId;
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching withdraw fees events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch withdraw fees events"
+      });
+    }
+  });
+
+  // Get withdraw fees events by market (alternative route)
+  app.get("/data/events/player/withdraw-fees/market/:marketId/:count?", async (req: any, res) => {
+    try {
+      const marketId = BigInt(req.params.marketId);
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const doc = await PlayerActionEventModel.find({
+        actionType: PlayerActionType.WITHDRAW_FEES,
+        marketId: marketId
+      })
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching withdraw fees events by market:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch withdraw fees events by market"
+      });
+    }
+  });
+
+  // Get all player action events
+  app.get("/data/events/player/actions/:pid1?/:pid2?/:count?", async (req: any, res) => {
+    try {
+      const pid1 = req.params.pid1 ? BigInt(req.params.pid1) : null;
+      const pid2 = req.params.pid2 ? BigInt(req.params.pid2) : null;
+      const count = parseInt(req.params.count || req.query.count || '20');
+      
+      const query: any = {};
+      if (pid1 !== null && pid2 !== null) {
+        query.$or = [
+          { pid: [pid1, pid2] },
+          { targetPid: [pid1, pid2] }
+        ];
+      }
+      
+      const doc = await PlayerActionEventModel.find(query)
+        .sort({ counter: -1 })
+        .limit(count);
+      
+      let data = doc.map((d) => docToJSON(d));
+      
+      res.status(201).send({
+        success: true,
+        data: data,
+      });
+    } catch (e) {
+      console.error("Error fetching player action events:", e);
+      res.status(500).send({
+        success: false,
+        error: "Failed to fetch player action events"
+      });
+    }
+  });
+
 
 }
 
 service.serve();
 
+const EVENT_PLAYER_UPDATE = 1;
 const EVENT_BET_UPDATE = 3;
 const EVENT_INDEXED_OBJECT = 4;
 
@@ -328,6 +576,18 @@ async function eventCallback(arg: TxWitness, data: BigUint64Array) {
         let eventData = data.slice(i + 1, i + 1 + Number(eventLength));
 
         switch (eventType) {
+            case EVENT_PLAYER_UPDATE:
+                {
+                    try {
+                        let playerAction = PlayerActionEventParser.fromEvent(eventData);
+                        let doc = new PlayerActionEventModel(playerAction);
+                        await doc.save();
+                    } catch (error) {
+                        console.error("Error processing player action event:", error);
+                        // Don't exit the process, just skip this event
+                    }
+                }
+                break;
             case EVENT_BET_UPDATE:
                 {
                     try {

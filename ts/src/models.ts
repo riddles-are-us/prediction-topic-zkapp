@@ -22,8 +22,10 @@ export const LIQUIDITY_HISTORY_INFO = 2;
 
 // ActionType enum removed - no longer needed since liquidity history only tracks snapshots
 
-// 价格计算工具类
+// Price calculation tool class - Note: Actual pricing is now done via LMSR on the backend
+// This is kept for reference/compatibility but prices should be fetched from backend
 export class PriceCalculator {
+    // Deprecated: Use backend LMSR pricing instead
     static calculatePrice(yesLiquidity: bigint, noLiquidity: bigint): { yesPrice: bigint, noPrice: bigint } {
         const totalLiq = yesLiquidity + noLiquidity;
         if (totalLiq === 0n) {
@@ -98,34 +100,39 @@ export class IndexedObject {
     }
 }
 
-// Market data structure matching Rust backend
+// Market data structure matching Rust backend (LMSR)
 export class MarketData {
     marketId?: bigint;
-    title: bigint[];
     startTime: bigint;
     endTime: bigint;
     resolutionTime: bigint;
-    yesLiquidity: bigint;
-    noLiquidity: bigint;
-    prizePool: bigint;
-    totalVolume: bigint;
+    // LMSR state = outstanding shares
     totalYesShares: bigint;
     totalNoShares: bigint;
+    // LMSR state = outstanding shares
+    initialYesLiquidity: bigint;
+    initialNoLiquidity: bigint;
+    // LMSR liquidity parameter b (market depth)
+    b: bigint;
+    // Collateral in the LMSR market
+    poolBalance: bigint;
+    // Volume stats
+    totalVolume: bigint;
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: bigint;
 
     constructor(data: any) {
-        this.title = data.title || [];
         this.startTime = data.startTime || 0n;
         this.endTime = data.endTime || 0n;
         this.resolutionTime = data.resolutionTime || 0n;
-        this.yesLiquidity = data.yesLiquidity || 0n;
-        this.noLiquidity = data.noLiquidity || 0n;
-        this.prizePool = data.prizePool || 0n;
-        this.totalVolume = data.totalVolume || 0n;
         this.totalYesShares = data.totalYesShares || 0n;
         this.totalNoShares = data.totalNoShares || 0n;
+        this.initialYesLiquidity = data.initialYesLiquidity || 0n;
+        this.initialNoLiquidity = data.initialNoLiquidity || 0n;
+        this.b = data.b || 0n;
+        this.poolBalance = data.poolBalance || 0n;
+        this.totalVolume = data.totalVolume || 0n;
         this.resolved = data.resolved || false;
         this.outcome = data.outcome;
         this.totalFeesCollected = data.totalFeesCollected || 0n;
@@ -136,37 +143,33 @@ export class MarketData {
         // First element is marketId from IndexedObject
         let index = 0;
         const marketId = data[index++];
-        
-        // Read title length and title data
-        const titleLen = Number(data[index++]);
-        const title = data.slice(index, index + titleLen);
-        index += titleLen;
-        
+
         const startTime = data[index++];
         const endTime = data[index++];
         const resolutionTime = data[index++];
-        const yesLiquidity = data[index++];
-        const noLiquidity = data[index++];
-        const prizePool = data[index++];
-        const totalVolume = data[index++];
         const totalYesShares = data[index++];
         const totalNoShares = data[index++];
+        const initialYesLiquidity = data[index++];
+        const initialNoLiquidity = data[index++];
+        const b = data[index++];
+        const poolBalance = data[index++];
+        const totalVolume = data[index++];
         const resolved = data[index++] === 1n;
         const outcomeValue = data[index++];
         const outcome = outcomeValue === 0n ? null : (outcomeValue === 2n ? true : false);
         const totalFeesCollected = data[index++];
 
         const marketData = new MarketData({
-            title,
             startTime,
             endTime,
             resolutionTime,
-            yesLiquidity,
-            noLiquidity,
-            prizePool,
-            totalVolume,
             totalYesShares,
             totalNoShares,
+            initialYesLiquidity,
+            initialNoLiquidity,
+            b,
+            poolBalance,
+            totalVolume,
             resolved,
             outcome,
             totalFeesCollected
@@ -176,12 +179,12 @@ export class MarketData {
     }
 }
 
-// Liquidity History Entry - simplified to only track liquidity snapshots
+// Shares History Entry - tracks LMSR shares snapshots
 export class LiquidityHistoryEntry {
     marketId: bigint;
     counter: bigint;
-    yesLiquidity: bigint;
-    noLiquidity: bigint;
+    yesLiquidity: bigint;  // Kept name for backward compatibility, but now represents totalYesShares
+    noLiquidity: bigint;   // Kept name for backward compatibility, but now represents totalNoShares
 
     constructor(data: any) {
         this.marketId = data.marketId;
@@ -200,19 +203,19 @@ export class LiquidityHistoryEntry {
     }
 }
 
-// Market Object Schema for IndexedObject pattern - main storage
+// Market Object Schema for IndexedObject pattern - main storage (LMSR)
 const marketObjectSchema = new mongoose.Schema({
     marketId: { type: BigInt, required: true, unique: true },
-    title: { type: [BigInt], required: true },
     startTime: { type: BigInt, required: true },
     endTime: { type: BigInt, required: true },
     resolutionTime: { type: BigInt, required: true },
-    yesLiquidity: { type: BigInt, required: true },
-    noLiquidity: { type: BigInt, required: true },
-    prizePool: { type: BigInt, default: 0n },
+    totalYesShares: { type: BigInt, required: true },
+    totalNoShares: { type: BigInt, required: true },
+    initialYesLiquidity: { type: BigInt, required: false, default: 0n },
+    initialNoLiquidity: { type: BigInt, required: false, default: 0n },
+    b: { type: BigInt, required: true },
+    poolBalance: { type: BigInt, default: 0n },
     totalVolume: { type: BigInt, default: 0n },
-    totalYesShares: { type: BigInt, default: 0n },
-    totalNoShares: { type: BigInt, default: 0n },
     resolved: { type: Boolean, default: false },
     outcome: { type: Boolean, default: null },
     totalFeesCollected: { type: BigInt, default: 0n },
@@ -373,38 +376,176 @@ export function u64ArrayToString(u64Array: bigint[]): string {
 }
 
 // Helper function to convert string to u64 array (for market titles)
-export function stringToU64Array(str: string): bigint[] {
-    const bytes = new TextEncoder().encode(str);
-    const result: bigint[] = [];
-    
-    for (let i = 0; i < bytes.length; i += 8) {
-        let value = 0n;
-        for (let j = 0; j < 8 && i + j < bytes.length; j++) {
-            value |= BigInt(bytes[i + j]) << BigInt(j * 8);
-        }
-        result.push(value);
-    }
-    
-    return result;
+// Note: Title encoding functions removed as titles are no longer stored in smart contract
+// Market titles and metadata should be managed through Sanity CMS
+// The following functions were removed:
+// - stringToU64Array(str: string): bigint[]
+// - validateMarketTitleLength(title: string): { valid: boolean; message?: string; u64Count?: number }
+
+// Player Action Event Types
+export enum PlayerActionType {
+    INSTALL_PLAYER = 'INSTALL_PLAYER',
+    WITHDRAW = 'WITHDRAW',
+    DEPOSIT = 'DEPOSIT',
+    CLAIM = 'CLAIM',
+    WITHDRAW_FEES = 'WITHDRAW_FEES'
 }
 
-// Market title length validation
-export function validateMarketTitleLength(title: string): { valid: boolean; message?: string; u64Count?: number } {
-    const u64Array = stringToU64Array(title);
-    const MAX_TITLE_U64_COUNT = 9; // Command length limit: 1 + title_len + 5 < 16, so title_len < 10, max value is 9
-    
-    if (u64Array.length > MAX_TITLE_U64_COUNT) {
+// Player Action Event Interface
+export interface PlayerActionEvent {
+    index: bigint;
+    pid: bigint[];
+    actionType: PlayerActionType;
+    counter: bigint;
+    // INSTALL_PLAYER fields
+    initialBalance?: bigint;
+    // WITHDRAW fields
+    amount?: bigint;
+    addressHigh?: bigint;
+    addressLow?: bigint;
+    // DEPOSIT fields
+    targetPid?: bigint[];
+    adminPid?: bigint[];
+    // CLAIM fields
+    marketId?: bigint;
+    payout?: bigint;
+    yesShares?: bigint;
+    noShares?: bigint;
+    // WITHDRAW_FEES fields
+    feesCollected?: bigint;
+}
+
+// Player Action Event Schema
+const playerActionEventSchema = new mongoose.Schema<PlayerActionEvent>({
+    index: { type: BigInt, required: true, unique: true },
+    pid: { type: [BigInt], required: true },
+    actionType: { type: String, required: true, enum: Object.values(PlayerActionType) },
+    counter: { type: BigInt, required: true },
+    initialBalance: { type: BigInt },
+    amount: { type: BigInt },
+    addressHigh: { type: BigInt },
+    addressLow: { type: BigInt },
+    targetPid: { type: [BigInt] },
+    adminPid: { type: [BigInt] },
+    marketId: { type: BigInt },
+    payout: { type: BigInt },
+    yesShares: { type: BigInt },
+    noShares: { type: BigInt },
+    feesCollected: { type: BigInt }
+});
+
+playerActionEventSchema.pre('init', ObjectEvent.uint64FetchPlugin);
+playerActionEventSchema.index({ pid: 1, counter: -1 });
+playerActionEventSchema.index({ actionType: 1, counter: -1 });
+playerActionEventSchema.index({ marketId: 1, counter: -1 });
+
+export const PlayerActionEventModel = mongoose.model('PlayerActionEvent', playerActionEventSchema);
+
+// Player Action Event class for parsing
+export class PlayerActionEventParser {
+    static fromEvent(data: BigUint64Array): PlayerActionEvent {
+        const dataArray = Array.from(data);
+        const length = dataArray.length;
+        
+        // Use length to determine action type
+        // INSTALL_PLAYER: [pid1, pid2, initial_balance, counter] = 4
+        // WITHDRAW: [pid1, pid2, amount, address_high, address_low, counter] = 6
+        // DEPOSIT: [target_pid1, target_pid2, amount, admin_pid1, admin_pid2, counter] = 6
+        // CLAIM: [pid1, pid2, market_id, payout, yes_shares, no_shares, counter] = 7
+        // WITHDRAW_FEES: [pid1, pid2, market_id, fees_collected, counter] = 5
+        
+        let actionType: PlayerActionType;
+        let pid: bigint[];
+        let counter: bigint;
+        let eventData: any = {};
+        
+        if (length === 4) {
+            // INSTALL_PLAYER
+            actionType = PlayerActionType.INSTALL_PLAYER;
+            pid = [dataArray[0], dataArray[1]];
+            eventData.initialBalance = dataArray[2];
+            counter = dataArray[3];
+        } else if (length === 6) {
+            // Could be WITHDRAW or DEPOSIT
+            // WITHDRAW: [pid1, pid2, amount, address_high, address_low, counter]
+            // DEPOSIT: [target_pid1, target_pid2, amount, admin_pid1, admin_pid2, counter]
+            // We can distinguish by checking if data[3] and data[4] look like addresses (large values) or pids
+            // For now, we'll use a heuristic: if data[3] > 1000000, it's likely an address (WITHDRAW)
+            // Otherwise, it's likely a pid (DEPOSIT)
+            if (dataArray[3] > 1000000n) {
+                // WITHDRAW
+                actionType = PlayerActionType.WITHDRAW;
+                pid = [dataArray[0], dataArray[1]];
+                eventData.amount = dataArray[2];
+                eventData.addressHigh = dataArray[3];
+                eventData.addressLow = dataArray[4];
+                counter = dataArray[5];
+            } else {
+                // DEPOSIT
+                actionType = PlayerActionType.DEPOSIT;
+                pid = [dataArray[3], dataArray[4]]; // admin pid
+                eventData.targetPid = [dataArray[0], dataArray[1]];
+                eventData.amount = dataArray[2];
+                eventData.adminPid = [dataArray[3], dataArray[4]];
+                counter = dataArray[5];
+            }
+        } else if (length === 7) {
+            // CLAIM
+            actionType = PlayerActionType.CLAIM;
+            pid = [dataArray[0], dataArray[1]];
+            eventData.marketId = dataArray[2];
+            eventData.payout = dataArray[3];
+            eventData.yesShares = dataArray[4];
+            eventData.noShares = dataArray[5];
+            counter = dataArray[6];
+        } else if (length === 5) {
+            // WITHDRAW_FEES
+            actionType = PlayerActionType.WITHDRAW_FEES;
+            pid = [dataArray[0], dataArray[1]];
+            eventData.marketId = dataArray[2];
+            eventData.feesCollected = dataArray[3];
+            counter = dataArray[4];
+        } else {
+            throw new Error(`Unknown player action event length: ${length}`);
+        }
+        
+        // Generate unique index: hash of all event data to ensure uniqueness
+        // This ensures uniqueness while being deterministic
+        // Hash includes counter, pid, actionType, and all event-specific data
+        let hashValue = counter;
+        hashValue = hashValue * 31n + pid[0];
+        hashValue = hashValue * 31n + pid[1];
+        hashValue = hashValue * 31n + BigInt(actionType.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0));
+        
+        // Add event-specific data to hash
+        if (eventData.initialBalance !== undefined) hashValue = hashValue * 31n + eventData.initialBalance;
+        if (eventData.amount !== undefined) hashValue = hashValue * 31n + eventData.amount;
+        if (eventData.addressHigh !== undefined) hashValue = hashValue * 31n + eventData.addressHigh;
+        if (eventData.addressLow !== undefined) hashValue = hashValue * 31n + eventData.addressLow;
+        if (eventData.targetPid !== undefined) {
+            hashValue = hashValue * 31n + eventData.targetPid[0];
+            hashValue = hashValue * 31n + eventData.targetPid[1];
+        }
+        if (eventData.adminPid !== undefined) {
+            hashValue = hashValue * 31n + eventData.adminPid[0];
+            hashValue = hashValue * 31n + eventData.adminPid[1];
+        }
+        if (eventData.marketId !== undefined) hashValue = hashValue * 31n + eventData.marketId;
+        if (eventData.payout !== undefined) hashValue = hashValue * 31n + eventData.payout;
+        if (eventData.yesShares !== undefined) hashValue = hashValue * 31n + eventData.yesShares;
+        if (eventData.noShares !== undefined) hashValue = hashValue * 31n + eventData.noShares;
+        if (eventData.feesCollected !== undefined) hashValue = hashValue * 31n + eventData.feesCollected;
+        
+        // Use absolute value to ensure positive index
+        const uniqueIndex = hashValue < 0n ? -hashValue : hashValue;
+        
         return {
-            valid: false,
-            message: `Title too long: ${u64Array.length} u64s (max: ${MAX_TITLE_U64_COUNT}). Current title: "${title}" (${title.length} chars, ${new TextEncoder().encode(title).length} bytes)`,
-            u64Count: u64Array.length
+            index: uniqueIndex,
+            pid,
+            actionType,
+            counter,
+            ...eventData
         };
     }
-    
-    return {
-        valid: true,
-        u64Count: u64Array.length
-    };
 }
-
 

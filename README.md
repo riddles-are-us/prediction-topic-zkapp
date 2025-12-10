@@ -1,13 +1,13 @@
 # Prediction Market - Multi-Market zkWasm Application
 
-A comprehensive zkWasm-based prediction market platform supporting multiple markets with advanced AMM algorithms, real-time event tracking, and IndexedObject pattern implementation.
+A comprehensive zkWasm-based prediction market platform supporting multiple markets with advanced LMSR (Logarithmic Market Scoring Rule) algorithms, real-time event tracking, and IndexedObject pattern implementation.
 
 ## 🚀 Features
 
 ### Core Market Functions
 - **Multi-Market Support**: Create and manage multiple prediction markets simultaneously
 - **Dynamic Market Creation**: Admin can create markets with custom titles, timeframes, and initial liquidity
-- **AMM Algorithm**: Automated Market Maker using constant product formula (x * y = k)
+- **LMSR Algorithm**: Logarithmic Market Scoring Rule for efficient price discovery
 - **Real-time Pricing**: Continuous price discovery based on liquidity ratios
 - **Buy/Sell Operations**: Users can trade YES/NO shares with immediate execution
 - **Market Resolution**: Admin-controlled market outcomes with automatic payout calculations
@@ -36,7 +36,7 @@ A comprehensive zkWasm-based prediction market platform supporting multiple mark
 ├── event.rs               # IndexedObject event system implementation
 ├── command.rs             # Transaction command processing
 ├── player.rs              # Player data structures and operations
-├── market.rs              # Market logic and AMM algorithms
+├── market.rs              # Market logic and LMSR algorithms
 ├── math_safe.rs           # Safe mathematical operations
 ├── settlement.rs          # Withdrawal settlement system
 ├── state.rs               # Global state and market management
@@ -52,27 +52,156 @@ A comprehensive zkWasm-based prediction market platform supporting multiple mark
 └── test_user.ts           # User interaction testing
 ```
 
-## 📊 AMM Algorithm
+## 📊 LMSR Algorithm
 
-### Constant Product Formula
-- **Formula**: `x * y = k` (where x = YES liquidity, y = NO liquidity)
-- **Price Calculation**: 
-  - YES Price = `NO_liquidity / (YES_liquidity + NO_liquidity)`
-  - NO Price = `YES_liquidity / (YES_liquidity + NO_liquidity)`
-- **Fee Structure**: 1% platform fee on all transactions (向上取整)
-- **Liquidity Impact**: Continuous price adjustment based on trading volume
+### Logarithmic Market Scoring Rule (High‑Level)
 
-### Example Calculation
-```typescript
-// Initial state: YES = 1,000,000, NO = 1,000,000
-// Current prices: YES = 50%, NO = 50%
+- **Cost Function**  
+  \( C(q_{\text{yes}}, q_{\text{no}}, b) = b \cdot \ln(\exp(q_{\text{yes}}/b) + \exp(q_{\text{no}}/b)) \)
 
-// User bets 10,000 on YES
-// Fee: 100 (1% of 10,000, rounded up)
-// Net amount: 9,900
-// New liquidity: YES = 910,083, NO = 1,009,900
-// New prices: YES ≈ 52.6%, NO ≈ 47.4%
-```
+- **Instantaneous Prices**
+  - YES price  
+    \( p_{\text{yes}} = \dfrac{\exp(q_{\text{yes}}/b)}{\exp(q_{\text{yes}}/b) + \exp(q_{\text{no}}/b)} \)
+  - NO price  
+    \( p_{\text{no}} = \dfrac{\exp(q_{\text{no}}/b)}{\exp(q_{\text{yes}}/b) + \exp(q_{\text{no}}/b)} = 1 - p_{\text{yes}} \)
+
+- **Trade Cost / Payout**
+  - Buy Δ YES:  
+    \( \text{cost} = C(q_{\text{yes}} + \Delta, q_{\text{no}}, b) - C(q_{\text{yes}}, q_{\text{no}}, b) \)
+  - Sell S YES:  
+    \( \text{payout} = C(q_{\text{yes}}, q_{\text{no}}, b) - C(q_{\text{yes}} - S, q_{\text{no}}, b) \)
+
+- **Parameters**
+  - **`q_yes`**: total YES shares outstanding in the AMM  
+  - **`q_no`**: total NO shares outstanding in the AMM  
+  - **`b`**: liquidity / depth parameter; larger `b` = flatter prices and lower slippage  
+
+- **Fee Structure**
+  - Platform fee is **1%** of the *token* amount, rounded up:
+    - `PLATFORM_FEE_RATE = 100`, `FEE_BASIS_POINTS = 10_000`
+    - Implemented by `calculate_fee_safe` in `math_safe.rs`
+  - Only the **net** amount (after fees) is deposited into the AMM pool.
+
+### Internal Fixed‑Point Representation (Rust)
+
+Rust implementation uses deterministic fixed‑point math to be zk‑friendly and overflow‑safe:
+
+- **Global precision constants** (in `config.rs`):
+  - `PRICE_PRECISION = 1_000_000` → 1e6 = 1.0 price unit  
+  - All public prices are integers in `[0, PRICE_PRECISION]`
+
+- **LMSR math scale** (in `math_safe.rs`):
+  - `FP_SCALE = 1_000_000u128` → internal 1e6 fixed‑point, matching `PRICE_PRECISION`  
+  - All internal `exp`, `ln`, cost, and price calculations are done in `u128` at this scale.
+
+- **Core LMSR helpers** (`math_safe.rs`):
+  - `lmsr_cost(q_yes: u64, q_no: u64, b: u64) -> Result<u128, u32>`  
+    Implements the cost function in fixed‑point.
+  - `lmsr_price_yes(...) -> Result<u128, u32>` / `lmsr_price_no(...) -> Result<u128, u32>`  
+    Return prices in `FP_SCALE` (1e6) fixed‑point.
+  - `lmsr_buy_yes_quote(...)` / `lmsr_buy_no_quote(...)`  
+    Return **trade cost** in `FP_SCALE` (1e6) fixed‑point token units.
+  - `lmsr_sell_yes_quote(...)` / `lmsr_sell_no_quote(...)`  
+    Return **payout** in `FP_SCALE` (1e6) fixed‑point token units.
+
+- **Public price helpers** (`math_safe.rs` → `market.rs`):
+  - `calculate_yes_price_lmsr` / `calculate_no_price_lmsr`  
+    - Convert the internal `u128` price to a `u64` using `PRICE_PRECISION`  
+    - Used by `MarketData::get_yes_price()` / `get_no_price()` in `market.rs`
+
+### How Share Quantities Are Calculated (Buying)
+
+When a user bets an amount `bet_amount` on YES/NO:
+
+1. **Validate & compute fee** (`math_safe.rs`):
+   - `validate_bet_amount(bet_amount)` ensures `0 < bet_amount ≤ MAX_BET_AMOUNT`.  
+   - `fee = calculate_fee_safe(bet_amount)` → 1% fee, rounded up.  
+   - `net_amount = bet_amount - fee` is what actually goes into the AMM pool.
+
+2. **Binary search for Δ shares** (`market.rs`):
+   - `MarketData::calculate_shares(bet_type, bet_amount)`:
+     - Runs a **binary search** over `Δ` in `[0, MAX_SHARES]`.  
+     - For each midpoint `Δ`:
+       - Calls `lmsr_buy_yes_quote(...)` or `lmsr_buy_no_quote(...)` to get the LMSR **cost** in `FP_SCALE`.  
+       - Converts to token units: `quote_tokens = (quote_fp / 1_000_000u128) as u64`.  
+     - If `quote_tokens ≤ net_amount`, we can afford `Δ` shares → move `lo` up.  
+     - If `quote_tokens > net_amount`, we cannot afford → move `hi` down.  
+   - The final `lo` is the **maximum integer number of shares** the user can buy with `net_amount`.
+
+3. **State update** (`MarketData::place_bet`):
+   - Recomputes `fee` and `net_amount`.  
+   - Mints:
+     - YES: `total_yes_shares += shares` (if `bet_type == 1`)  
+     - NO:  `total_no_shares += shares` (if `bet_type == 0`)  
+   - Updates balances:
+     - `pool_balance += net_amount`  
+     - `total_volume += bet_amount` (gross)  
+     - `total_fees_collected += fee`
+
+### How Payouts Are Calculated (Selling)
+
+For selling `shares_to_sell`:
+
+1. **Check balances & shares**:
+   - `validate_shares(shares_to_sell)` and ensure the market has at least that many outstanding YES/NO shares.
+
+2. **Get gross payout from LMSR**:
+   - `MarketData::calculate_sell_details`:
+     - YES: uses `lmsr_sell_yes_quote(...)`  
+     - NO: uses `lmsr_sell_no_quote(...)`  
+     - Result is `gross_quote_fp` in fixed‑point; convert to tokens:  
+       `gross_tokens = (gross_quote_fp / 1_000_000u128) as u64`.
+
+3. **Apply fees & update state**:
+   - Fee: `fee = calculate_fee_safe(gross_tokens)`  
+   - Net payout: `net_payout = gross_tokens - fee`  
+   - Reduce pool and burn shares:
+     - `pool_balance -= net_payout`  
+     - `total_yes_shares` or `total_no_shares` decreased by `shares_to_sell`  
+   - `total_fees_collected += fee`, `total_volume += net_payout + fee`.
+
+### Choosing the Liquidity Parameter `b`
+
+The parameter `b` controls **how quickly prices move** as traders buy/sell:
+
+- **Intuition**
+  - Larger `b`:
+    - Flatter cost curve → **lower slippage** for a given trade size.  
+    - More capital required to move the price significantly.  
+  - Smaller `b`:
+    - Steeper cost curve → **higher slippage**.  
+    - Prices react more strongly to each trade.
+
+- **Typical scale in this project**
+  - `q_yes` and `q_no` are usually initialized around **100,000**  
+    (`DEFAULT_MARKET.initial_yes_liquidity` / `initial_no_liquidity`).  
+  - A natural choice is to set `b` on the order of the **initial total liquidity**:
+    - Example: `q_yes = q_no = 100_000`, choose `b ≈ 100_000`.
+
+- **Concrete example (mirrors the Rust tests)**
+  - Initial state:
+    - `q_yes = 100_000`, `q_no = 100_000`, `b = 100_000`  
+    - Prices start near 50% / 50%.  
+  - Player bets `5,000` tokens on YES:
+    - Fee (1%): `50`, net to AMM: `4,950`.  
+    - LMSR cost curve (using `lmsr_buy_yes_quote`) implies:
+      - Buying **~10,000 YES shares** costs **≈ 5,000 tokens**.  
+    - After binary search, `calculate_shares` will return **around 9k–10k** YES shares.  
+    - The YES price (from `get_yes_price`) moves above 50%, reflecting the new imbalance.
+
+- **Practical guidelines**
+  - **Small markets / high volatility desired**:
+    - Use smaller `b` (e.g. `b` ≈ 0.5 × initial total shares).  
+    - Prices move sharply with each trade; good for thin markets.  
+  - **Large, liquid markets / low slippage desired**:
+    - Use larger `b` (e.g. `b` ≈ 1–3 × initial total shares).  
+    - Prices move smoothly; better UX for larger trades.  
+  - Always ensure:
+    - `validate_b(b)` passes (`b > 0`).  
+    - `b` is chosen such that expected maximum trades do **not** cause overflow  
+      (the implementation uses safe `u128` and explicit checks, but extreme `q / b` should still be avoided).
+
+For more numerical examples and sanity checks, see `LMSR_CALCULATION_EXAMPLES.md`, which contains step‑by‑step LMSR scenarios consistent with the Rust implementation in `math_safe.rs` and `market.rs`.
 
 ## 🔌 API Endpoints
 
@@ -151,10 +280,11 @@ const market = await api.getMarket("0");
 console.log(`Market: ${market.titleString}`);
 console.log(`YES: ${market.yesLiquidity}, NO: ${market.noLiquidity}`);
 
-// Calculate current prices
-const yesLiq = BigInt(market.yesLiquidity);
-const noLiq = BigInt(market.noLiquidity);
-const prices = api.calculatePrices(yesLiq, noLiq);
+// Calculate current prices (LMSR)
+const yesLiq = BigInt(market.totalYesShares);
+const noLiq = BigInt(market.totalNoShares);
+const b = BigInt(market.b || 1000000); // Default b if not provided
+const prices = api.calculatePrices(yesLiq, noLiq, b);
 console.log(`Prices - YES: ${(prices.yesPrice * 100).toFixed(2)}%, NO: ${(prices.noPrice * 100).toFixed(2)}%`);
 ```
 
@@ -163,26 +293,26 @@ console.log(`Prices - YES: ${(prices.yesPrice * 100).toFixed(2)}%, NO: ${(prices
 // Place bet
 await player.placeBet(0n, 1, 10000n); // Market 0, YES, 10,000 units
 
-// Calculate expected shares
-const expectedShares = api.calculateShares(1, 10000, yesLiq, noLiq);
+// Calculate expected shares (LMSR)
+const expectedShares = api.calculateShares(1, 10000, yesLiq, noLiq, b);
 console.log(`Expected shares: ${expectedShares}`);
 
 // Sell shares
 await player.sellShares(0n, 1, 5000n); // Market 0, YES, 5,000 shares
 
-// Calculate sell value
-const sellValue = api.calculateSellValue(1, 5000, yesLiq, noLiq);
+// Calculate sell value (LMSR)
+const sellValue = api.calculateSellValue(1, 5000, yesLiq, noLiq, b);
 console.log(`Sell value: ${sellValue}`);
 ```
 
 ### Market Analysis
 ```typescript
-// Market impact analysis
-const impact = api.calculateMarketImpact(1, 50000, yesLiq, noLiq);
+// Market impact analysis (LMSR)
+const impact = api.calculateMarketImpact(1, 50000, yesLiq, noLiq, b);
 console.log(`Price impact: ${(impact.currentYesPrice * 100).toFixed(2)}% → ${(impact.newYesPrice * 100).toFixed(2)}%`);
 
-// Slippage calculation
-const slippage = api.calculateSlippage(1, 50000, yesLiq, noLiq);
+// Slippage calculation (LMSR)
+const slippage = api.calculateSlippage(1, 50000, yesLiq, noLiq, b);
 console.log(`Slippage: ${slippage.toFixed(4)}%`);
 
 // Get liquidity history
@@ -194,14 +324,15 @@ console.log(`Liquidity data points: ${history.length}`);
 ```typescript
 const admin = new Player("admin_private_key", rpc);
 
-// Create new market with relative time offsets
+// Create new market with relative time offsets (LMSR)
+// Note: Add title "Will Ethereum reach $5000 in 2024?" to Sanity CMS with the created market ID
 await admin.createMarket(
-    "Will Ethereum reach $5000 in 2024?",
     0n,      // Start immediately (0 ticks offset = 0 seconds)
     17280n,  // End in 1 day (17280 ticks * 5s = 86400s = 1 day)
     17400n,  // Resolution 10 minutes after end (17400 ticks * 5s = 87000s)
-    1000000n, // 1M YES liquidity
-    1000000n  // 1M NO liquidity
+    100000n, // Initial YES shares
+    100000n, // Initial NO shares
+    1000000n // b parameter (LMSR liquidity parameter)
 );
 
 // Time calculation examples:
@@ -209,6 +340,8 @@ await admin.createMarket(
 // - 1 hour = 720 ticks (720 * 5s = 3600s)
 // - 1 day = 17280 ticks (17280 * 5s = 86400s)
 // All times are RELATIVE offsets from market creation time
+
+// After market is created, add the title and metadata to Sanity CMS
 
 // Resolve market
 await admin.resolveMarket(1n, true); // Market 1, YES outcome
@@ -361,22 +494,22 @@ ZKWASM_RPC_URL=http://localhost:3000
 ```typescript
 interface MarketData {
     marketId: string;
-    title: string;
-    titleString?: string;         // Human-readable title
+    titleString?: string;         // Human-readable title from Sanity CMS
     startTime: string;
     endTime: string;
     resolutionTime: string;
-    yesLiquidity: string;         // AMM liquidity
-    noLiquidity: string;          // AMM liquidity
-    prizePool: string;            // Real user funds for payouts
+    totalYesShares: string;       // Total YES shares (LMSR q_yes)
+    totalNoShares: string;         // Total NO shares (LMSR q_no)
+    b: string;                    // LMSR liquidity parameter
+    poolBalance: string;            // Real user funds for payouts
     totalVolume: string;          // Cumulative trading volume
-    totalYesShares: string;       // Total YES shares issued
-    totalNoShares: string;        // Total NO shares issued
     resolved: boolean;
     outcome: boolean | null;
     totalFeesCollected: string;
 }
 ```
+
+**Note**: The `titleString` field is populated from Sanity CMS on the frontend. The smart contract only stores core market logic data.
 
 ### Liquidity History (Simplified)
 ```typescript

@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import { PlayerConvention, ZKWasmAppRpc, createCommand } from 'zkwasm-minirollup-rpc';
 import { LeHexBN } from "zkwasm-ts-server";
 import { PredictionMarketAPI } from './api.js';
-import { stringToU64Array } from './models.js';
 
 dotenv.config();
 
@@ -98,28 +97,28 @@ class Player extends PlayerConvention {
         return await this.sendTransactionWithCommand(cmd);
     }
 
-    // New function to create markets with relative time offsets
+    // New function to create markets with relative time offsets (LMSR)
+    // Note: Title should be managed in Sanity CMS, not in smart contract
     async createMarket(
-        title: string,
         startTimeOffset: bigint,    // Offset from current counter
         endTimeOffset: bigint,      // Offset from current counter
         resolutionTimeOffset: bigint, // Offset from current counter
-        yesLiquidity: bigint,
-        noLiquidity: bigint
+        initialYesLiquidity: bigint, // Initial YES shares for LMSR
+        initialNoLiquidity: bigint,  // Initial NO shares for LMSR
+        b: bigint                    // LMSR liquidity parameter (market depth)
     ) {
         let nonce = await this.getNonce();
-        const titleU64Array = stringToU64Array(title);
-        
-        // Build command: [cmd, ...title_u64s, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity]
+
+        // Build command: [start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity, b]
         const params = [
-            ...titleU64Array,
             startTimeOffset,
             endTimeOffset,
             resolutionTimeOffset,
-            yesLiquidity,
-            noLiquidity
+            initialYesLiquidity,
+            initialNoLiquidity,
+            b
         ];
-        
+
         let cmd = createCommand(nonce, BigInt(CREATE_MARKET), params);
         return await this.sendTransactionWithCommand(cmd);
     }
@@ -147,31 +146,32 @@ async function logStateInfo(rpc: any, player: Player, playerName: string, stepDe
     }
 }
 
-// Test AMM calculations
-function testAMMCalculations() {
-    console.log("=== Testing AMM Calculations ===");
+// Test LMSR calculations
+function testLMSRCalculations() {
+    console.log("=== Testing LMSR Calculations ===");
     
     const api = new PredictionMarketAPI();
     
     // Initial liquidity
     const initialYesLiquidity = 100000n;
     const initialNoLiquidity = 100000n;
+    const defaultB = 1000000n;
     
     console.log(`Initial liquidity - YES: ${initialYesLiquidity}, NO: ${initialNoLiquidity}`);
     
     // Test initial prices (should be 50/50)
-    const initialPrices = api.calculatePrices(initialYesLiquidity, initialNoLiquidity);
+    const initialPrices = api.calculatePrices(initialYesLiquidity, initialNoLiquidity, defaultB);
     console.log(`Initial prices - YES: ${(initialPrices.yesPrice * 100).toFixed(2)}%, NO: ${(initialPrices.noPrice * 100).toFixed(2)}%`);
     
     // Test bet calculations
     const betAmount = 10000;
     
     // Calculate YES bet
-    const yesShares = api.calculateShares(1, betAmount, initialYesLiquidity, initialNoLiquidity);
+    const yesShares = api.calculateShares(1, betAmount, initialYesLiquidity, initialNoLiquidity, defaultB);
     console.log(`\nBetting ${betAmount} on YES:`);
     console.log(`Expected shares: ${yesShares}`);
     
-    console.log("\n=== AMM Test Complete ===\n");
+    console.log("\n=== LMSR Test Complete ===\n");
 }
 
 async function testMultiMarketPrediction() {
@@ -185,9 +185,9 @@ async function testMultiMarketPrediction() {
     if (!adminKey) {
         throw new Error("SERVER_ADMIN_KEY environment variable is required");
     }
-    const player1Key = "456789789";
-    const player2Key = "987654321";
-    const player3Key = "111222333"; // Third player for more testing
+    const player1Key = "4567897";
+    const player2Key = "9876543";
+    const player3Key = "1112223"; // Third player for more testing
     
     console.log("Admin key from env:", adminKey);
     
@@ -255,40 +255,44 @@ async function testMultiMarketPrediction() {
         // Now using relative time offsets (relative to current counter)
         
         // Market 1: Bitcoin price prediction
+        // Using smaller q/b ratio (~0.1) for LMSR Taylor approximations to work correctly
+        // Note: Title "Will Bitcoin reach $130K by end of 2025?" should be added to Sanity CMS with id=1
         console.log("Creating Market 1: Bitcoin Price Prediction");
         await admin.createMarket(
-            "Will Bitcoin reach $130K by end of 2025?",
             0n,    // Start immediately (offset 0)
-            100000n,  // End after 50 counter ticks
-            100000n,  // Resolve after 50 counter ticks
-            1000000n, // 50K initial YES liquidity
-            1000000n  // 50K initial NO liquidity
+            100000n,  // End after 100K counter ticks
+            110000n,  // Resolve after 100K counter ticks
+            100000n,   // 100K initial YES shares (q/b = 0.1)
+            100000n,   // 100K initial NO shares (q/b = 0.1)
+            1000000n   // b parameter for LMSR
         );
-        
+
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
         // Market 2: Election prediction
+        // Note: Title "Will candidate A win the election?" should be added to Sanity CMS with id=2
         console.log("Creating Market 2: Election Prediction");
         await admin.createMarket(
-            "Will candidate A win the election?",
             0n,    // Start immediately (offset 0)
-            50000n,  // End after 50 counter ticks
-            50000n,  // Resolve after 50 counter ticks
-            1000000n, // 30K initial YES liquidity
-            1000000n  // 70K initial NO liquidity (biased market)
+            50000n,  // End after 50K counter ticks
+            50000n,  // Resolve after 50K counter ticks
+            100000n,  // 100K initial YES shares (q/b = 0.1)
+            100000n,  // 100K initial NO shares (q/b = 0.1)
+            1000000n   // b parameter for LMSR
         );
-        
+
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Market 3: Sports prediction
+        // Note: Title "Will Team X win the championship?" should be added to Sanity CMS with id=3
         console.log("Creating Market 3: Sports Prediction");
         await admin.createMarket(
-            "Will Team X win the championship?",
             0n,    // Start immediately (offset 0)
-            30000n,  // End after 50 counter ticks
-            30000n,  // Resolve after 50 counter ticks
-            1000000n, // 25K initial YES liquidity
-            1000000n  // 25K initial NO liquidity
+            30000n,  // End after 30K counter ticks
+            30000n,  // Resolve after 30K counter ticks
+            100000n,  // 100K initial YES shares (q/b = 0.1)
+            100000n,  // 100K initial NO shares (q/b = 0.1)
+            1000000n   // b parameter for LMSR
         );
 
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -319,7 +323,6 @@ async function testMultiMarketPrediction() {
         } catch (error) {
             console.log("Player1 bet error:", error);
         }
-        
         // Player2 bets on NO
         try {
             await player2.placeBet(market1Id, 0, 1500n); // NO bet
@@ -422,58 +425,58 @@ async function testMultiMarketPrediction() {
         console.log("\n=== STEP 8: Resolving Markets (RESOLVE) ===");
         
         // Resolve Market 1: YES wins
-        // try {
-        //     await admin.resolveMarket(market1Id, true); // YES outcome
-        //     console.log("Market 1 resolved: YES wins");
-        // } catch (error) {
-        //     console.log("Market 1 resolve error:", error);
-        // }
+        try {
+            await admin.resolveMarket(market1Id, true); // YES outcome
+            console.log("Market 1 resolved: YES wins");
+        } catch (error) {
+            console.log("Market 1 resolve error:", error);
+        }
         
-        // // Resolve Market 2: NO wins
-        // try {
-        //     await admin.resolveMarket(market2Id, false); // NO outcome
-        //     console.log("Market 2 resolved: NO wins");
-        // } catch (error) {
-        //     console.log("Market 2 resolve error:", error);
-        // }
+        // Resolve Market 2: NO wins
+        try {
+            await admin.resolveMarket(market2Id, false); // NO outcome
+            console.log("Market 2 resolved: NO wins");
+        } catch (error) {
+            console.log("Market 2 resolve error:", error);
+        }
 
-        // // Resolve Market 3: YES wins
-        // try {
-        //     await admin.resolveMarket(market3Id, true); // YES outcome
-        //     console.log("Market 3 resolved: YES wins");
-        // } catch (error) {
-        //     console.log("Market 3 resolve error:", error);
-        // }
+        // Resolve Market 3: YES wins
+        try {
+            await admin.resolveMarket(market3Id, true); // YES outcome
+            console.log("Market 3 resolved: YES wins");
+        } catch (error) {
+            console.log("Market 3 resolve error:", error);
+        }
 
-        // await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Step 9: Players claim winnings (CLAIM command)
         // console.log("\n=== STEP 9: Players Claim Winnings (CLAIM) ===");
         
         // // Each player claims from each market
         const markets = [market1Id, market2Id, market3Id];
-        // const players = [
-        //     { player: player1, name: "Player1" },
-        //     { player: player2, name: "Player2" },
-        //     { player: player3, name: "Player3" }
-        // ];
+        const players = [
+            { player: player1, name: "Player1" },
+            { player: player2, name: "Player2" },
+            { player: player3, name: "Player3" }
+        ];
 
-        // for (const marketId of markets) {
-        //     for (const { player, name } of players) {
-        //         try {
-        //             await player.claimWinnings(marketId);
-        //             console.log(`${name} claimed winnings from Market ${marketId}`);
-        //         } catch (error) {
-        //             if (error instanceof Error && error.message === "NoWinningPosition") {
-        //                 console.log(`${name} has no winning position in Market ${marketId}`);
-        //             } else {
-        //                 console.log(`${name} claim error for Market ${marketId}:`, error);
-        //             }
-        //         }
-        //     }
-        // }
+        for (const marketId of markets) {
+            for (const { player, name } of players) {
+                try {
+                    await player.claimWinnings(marketId);
+                    console.log(`${name} claimed winnings from Market ${marketId}`);
+                } catch (error) {
+                    if (error instanceof Error && error.message === "NoWinningPosition") {
+                        console.log(`${name} has no winning position in Market ${marketId}`);
+                    } else {
+                        console.log(`${name} claim error for Market ${marketId}:`, error);
+                    }
+                }
+            }
+        }
 
-        // await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Step 10: Admin withdraws fees from all markets (WITHDRAW_FEES command)
         console.log("\n=== STEP 10: Admin Withdraws Fees (WITHDRAW_FEES) ===");
@@ -538,8 +541,8 @@ async function runExamples() {
     console.log("Running comprehensive multi-market prediction test...\n");
     
     try {
-        // Test AMM calculations first
-        testAMMCalculations();
+        // Test LMSR calculations first
+        testLMSRCalculations();
         
         // Then test all commands
         await testMultiMarketPrediction();

@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::event::{insert_event, EVENT_BET_UPDATE, emit_market_indexed_object};
+use crate::event::{insert_event, EVENT_BET_UPDATE, EVENT_PLAYER_UPDATE, emit_market_indexed_object};
 use crate::player::Player;
 use crate::state::{GLOBAL_STATE};
 
@@ -25,7 +25,7 @@ pub struct Withdraw {
 }
 
 impl CommandHandler for Withdraw {
-    fn handle(&self, pid: &[u64; 2], nonce: u64, _rand: &[u64; 4], _counter: u64) -> Result<(), u32> {
+    fn handle(&self, pid: &[u64; 2], nonce: u64, _rand: &[u64; 4], counter: u64) -> Result<(), u32> {
         let mut player = Player::get_from_pid(pid);
         match player.as_mut() {
             None => Err(ERROR_PLAYER_NOT_EXIST),
@@ -38,6 +38,18 @@ impl CommandHandler for Withdraw {
                 let withdrawinfo = zkwasm_rest_abi::WithdrawInfo::new(&[self.data[0], self.data[1], self.data[2]], 0);
                 crate::settlement::SettlementInfo::append_settlement(withdrawinfo);
                 player.store();
+                
+                // Emit event for withdraw
+                let mut data = vec![
+                    pid[0],
+                    pid[1],
+                    amount,
+                    self.data[1], // address_high
+                    self.data[2], // address_low
+                    counter,
+                ];
+                insert_event(EVENT_PLAYER_UPDATE, &mut data);
+                
                 Ok(())
             }
         }
@@ -50,16 +62,30 @@ pub struct Deposit {
 }
 
 impl CommandHandler for Deposit {
-    fn handle(&self, pid: &[u64; 2], nonce: u64, _rand: &[u64; 4], _counter: u64) -> Result<(), u32> {
+    fn handle(&self, pid: &[u64; 2], nonce: u64, _rand: &[u64; 4], counter: u64) -> Result<(), u32> {
         let mut admin = Player::get_from_pid(pid).unwrap();
         admin.check_and_inc_nonce(nonce);
-        let mut player = Player::get_from_pid(&[self.data[0], self.data[1]]);
+        let target_pid = [self.data[0], self.data[1]];
+        let mut player = Player::get_from_pid(&target_pid);
         match player.as_mut() {
             None => Err(ERROR_PLAYER_NOT_EXIST),
             Some(player) => {
-                player.data.balance += self.data[2];
+                let amount = self.data[2];
+                player.data.balance += amount;
                 player.store();
                 admin.store();
+                
+                // Emit event for deposit
+                let mut data = vec![
+                    target_pid[0],
+                    target_pid[1],
+                    amount,
+                    pid[0], // admin_pid[0]
+                    pid[1], // admin_pid[1]
+                    counter,
+                ];
+                insert_event(EVENT_PLAYER_UPDATE, &mut data);
+                
                 Ok(())
             }
         }
@@ -74,7 +100,7 @@ pub enum Activity {
     Resolve(u64, u64),         // market_id, outcome
     Claim(u64),                // market_id
     WithdrawFees(u64),         // market_id
-    CreateMarket(Vec<u64>, u64, u64, u64, u64, u64), // title_u64_vec, start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity
+    CreateMarket(u64, u64, u64, u64, u64, u64), // start_time_offset, end_time_offset, resolution_time_offset, yes_liquidity, no_liquidity, b
 }
 
 impl CommandHandler for Activity {
@@ -102,9 +128,9 @@ impl CommandHandler for Activity {
                         // Only admin can withdraw fees - we need to check this at a higher level
                         Self::handle_withdraw_fees(player, *market_id, counter)
                     },
-                    Activity::CreateMarket(title_u64_vec, start_time, end_time, resolution_time, yes_liquidity, no_liquidity) => {
+                    Activity::CreateMarket(start_time, end_time, resolution_time, yes_liquidity, no_liquidity, b) => {
                         // Only admin can create markets - we need to check this at a higher level
-                        Self::handle_create_market(title_u64_vec.clone(), *start_time, *end_time, *resolution_time, *yes_liquidity, *no_liquidity, counter)
+                        Self::handle_create_market(*start_time, *end_time, *resolution_time, *yes_liquidity, *no_liquidity, *b, counter)
                     }
                 }
             }
@@ -225,7 +251,7 @@ impl Activity {
         Ok(())
     }
 
-    fn handle_claim(player: &mut Player, market_id: u64, _counter: u64) -> Result<(), u32> {
+    fn handle_claim(player: &mut Player, market_id: u64, counter: u64) -> Result<(), u32> {
         let market = crate::state::MarketManager::get_market(market_id)
             .ok_or(crate::error::ERROR_MARKET_NOT_ACTIVE)?;
         
@@ -249,10 +275,22 @@ impl Activity {
         player.data.add_balance(payout);
         player.store();
 
+        // Emit event for claim
+        let mut data = vec![
+            player.player_id[0],
+            player.player_id[1],
+            market_id,
+            payout,
+            yes_shares,
+            no_shares,
+            counter,
+        ];
+        insert_event(EVENT_PLAYER_UPDATE, &mut data);
+
         Ok(())
     }
 
-    fn handle_withdraw_fees(player: &mut Player, market_id: u64, _counter: u64) -> Result<(), u32> {
+    fn handle_withdraw_fees(player: &mut Player, market_id: u64, counter: u64) -> Result<(), u32> {
         let mut market = crate::state::MarketManager::get_market(market_id)
             .ok_or(crate::error::ERROR_MARKET_NOT_ACTIVE)?;
         
@@ -272,22 +310,32 @@ impl Activity {
         // Store updated player data
         player.store();
 
+        // Emit event for fee withdrawal
+        let mut data = vec![
+            player.player_id[0],
+            player.player_id[1],
+            market_id,
+            fees_collected,
+            counter,
+        ];
+        insert_event(EVENT_PLAYER_UPDATE, &mut data);
+
         Ok(())
     }
 
-    fn handle_create_market(title_u64_vec: Vec<u64>, start_time_offset: u64, end_time_offset: u64, resolution_time_offset: u64, yes_liquidity: u64, no_liquidity: u64, counter: u64) -> Result<(), u32> {
+    fn handle_create_market(start_time_offset: u64, end_time_offset: u64, resolution_time_offset: u64, yes_liquidity: u64, no_liquidity: u64, b: u64, counter: u64) -> Result<(), u32> {
         // Calculate absolute times by adding offsets to current counter
         let absolute_start_time = counter + start_time_offset;
         let absolute_end_time = counter + end_time_offset;
         let absolute_resolution_time = counter + resolution_time_offset;
-        
-        let _market_id = crate::state::MarketManager::create_market_with_title_u64_and_liquidity(
-            title_u64_vec,
+
+        let _market_id = crate::state::MarketManager::create_market_with_liquidity(
             absolute_start_time,
             absolute_end_time,
             absolute_resolution_time,
             yes_liquidity,
             no_liquidity,
+            b,
         )?;
 
         Ok(())
